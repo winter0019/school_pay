@@ -1,0 +1,85 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+  command = "echo '🚀 Build completed successfully'"
+
+[functions]
+  node_version = "18"
+  node_bundler = "esbuild"
+  included_files = ["public/data/*.json"]
+
+# SPA Routing & Custom Error Pages
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  force = false
+  conditions:
+    Status = "404"
+
+[[redirects]]
+  from = "/liked_movies/*"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/404"
+  to = "/404.html"
+  status = 404
+  force = true
+
+# Security Headers (Global)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = '''
+      default-src 'self' api.themoviedb.org www.googletagmanager.com acscdn.com;
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' www.googletagmanager.com apis.google.com acscdn.com;
+      style-src 'self' 'unsafe-inline' fonts.googleapis.com;
+      img-src 'self' data: image.tmdb.org www.google-analytics.com;
+      font-src 'self' fonts.gstatic.com;
+      connect-src 'self' api.themoviedb.org www.google-analytics.com;
+      frame-src www.youtube.com;
+    '''
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# Cache Optimization
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, must-revalidate"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+# Function-Specific Headers
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Content-Security-Policy = "default-src 'none'"
+
+# Fallback Error Handling
+[[headers]]
+  for = "/404.html"
+  [headers.values]
+    Cache-Control = "public, max-age=300, must-revalidate"

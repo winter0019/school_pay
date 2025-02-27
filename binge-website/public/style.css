@@ -1,0 +1,43 @@
+:root {
+    --sidebar-width: 250px;
+    --primary-color: #2a2185;
+    --secondary-color: #fff;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Poppins', sans-serif;
+}
+
+body {
+    background: #0F0F0F;
+    transition: all 0.5s ease;
+}
+
+.sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: var(--sidebar-width);
+    background: var(--primary-color);
+    padding: 6px 14px;
+    z-index: 99;
+    transition: all 0.5s ease;
+}
+
+/* Full sidebar styling from original code */
+/* Add all your CSS styles here */
+/* Ensure responsive design for mobile */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 78px;
+    }
+    
+    .scroll-container {
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+    }
+}
