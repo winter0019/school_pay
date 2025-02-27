@@ -1,81 +1,49 @@
 [build]
   publish = "public"
   functions = "netlify/functions"
-  command = "mkdir -p public && echo 'Directory verified'"
+  command = "mkdir -p public && cp *.html public/ && cp *.css public/ && cp *.js public/ && cp favicon.ico public/"
 
 [functions]
   node_version = "18"
   node_bundler = "esbuild"
   included_files = ["public/data/*.json"]
 
-# Enhanced SPA Routing
+# Reliable SPA Routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-  force = false
   conditions:
-    Status = 404-410
+    Status = "404-410"
 
 [[redirects]]
   from = "/liked_movies/*"
   to = "/index.html"
   status = 200
-  force = true
 
-# Explicit 404 Handling
+# Error Handling
 [[redirects]]
   from = "/404"
   to = "/404.html"
   status = 404
-  force = true
 
-# Security Headers with Enhanced CSP
+# Security Headers (Optimized)
 [[headers]]
   for = "/*"
   [headers.values]
-    Access-Control-Allow-Origin = "*"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
-    X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Content-Security-Policy = '''
-      default-src 'self' api.themoviedb.org;
-      script-src 'self' 'unsafe-inline' 'unsafe-eval' www.googletagmanager.com acscdn.com;
-      style-src 'self' 'unsafe-inline' fonts.googleapis.com;
-      img-src 'self' data: image.tmdb.org www.google-analytics.com;
-      font-src 'self' fonts.gstatic.com;
-      connect-src 'self' api.themoviedb.org www.google-analytics.com;
-      frame-src 'self' www.youtube.com;
-      object-src 'none';
-      base-uri 'self';
-      form-action 'self';
-    '''
-    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-    Permissions-Policy = "geolocation=(), microphone=(), camera=(), interest-cohort=()"
+    Content-Security-Policy = "default-src 'self' api.themoviedb.org www.googletagmanager.com; script-src 'self' 'unsafe-inline'; style-src 'self' fonts.googleapis.com; img-src 'self' data: image.tmdb.org; font-src 'self' fonts.gstatic.com"
+    Permissions-Policy = "geolocation=(), microphone=()"
 
-# Cache Control Improvements
+# Cache Headers
 [[headers]]
   for = "/assets/*"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable, stale-while-revalidate=86400"
+    Cache-Control = "public, max-age=31536000"
 
 [[headers]]
   for = "/*.js"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, must-revalidate"
-
-# Function Security
-[[headers]]
-  for = "/.netlify/functions/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Cache-Control = "no-cache, no-store, must-revalidate, max-age=0"
-    Content-Security-Policy = "default-src 'none'"
-    X-Content-Type-Options = "nosniff"
-
-# 404 Page Caching
-[[headers]]
-  for = "/404.html"
-  [headers.values]
-    Cache-Control = "public, max-age=300, must-revalidate"
+    Cache-Control = "public, max-age=31536000"
