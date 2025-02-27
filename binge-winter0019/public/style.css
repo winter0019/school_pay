@@ -1,0 +1,127 @@
+:root {
+  /* Dimensions */
+  --sidebar-width: 250px;
+  --sidebar-collapsed: 78px;
+  
+  /* Colors - Dark Theme */
+  --primary-color: #3b2fc6;
+  --secondary-color: #e9ecef;
+  --background-color: #0F0F0F;
+  --accent-color: #ff4757;
+  
+  /* Transitions */
+  --transition-speed: 0.3s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-speed: 0.01ms;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background-color);
+  color: var(--secondary-color);
+  font-family: 'Poppins', sans-serif;
+  line-height: 1.6;
+  transition: background-color var(--transition-speed) ease;
+}
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 1rem;
+  padding: 0.8rem;
+  background: var(--primary-color);
+  color: var(--secondary-color);
+  border-radius: 0.25rem;
+  z-index: 1000;
+  transition: transform var(--transition-speed) ease;
+}
+
+.skip-link:focus {
+  transform: translateY(4rem);
+}
+
+.sidebar {
+  position: fixed;
+  height: 100vh;
+  width: var(--sidebar-width);
+  background: var(--primary-color);
+  padding: 0.5rem 1rem;
+  transition: width var(--transition-speed) ease;
+  z-index: 1000;
+}
+
+.scroll-container {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 1rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 1rem;
+  scrollbar-color: var(--primary-color) rgba(255, 255, 255, 0.1);
+}
+
+.scroll-container::-webkit-scrollbar {
+  height: 0.5rem;
+}
+
+.scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 1rem;
+}
+
+.movie-card {
+  position: relative;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  transition: transform var(--transition-speed) ease;
+  scroll-snap-align: start;
+}
+
+.movie-card:hover {
+  transform: translateY(-0.5rem);
+}
+
+.movie-card img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: var(--sidebar-collapsed);
+  }
+  
+  .scroll-container {
+    scroll-padding-inline: 1rem;
+  }
+}
+
+.noscript-warning {
+  padding: 2rem;
+  text-align: center;
+  background: #dc3545;
+  color: white;
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 9999;
+}

@@ -1,0 +1,24 @@
+[build]
+  command = "npm run build"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_version = "18"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  conditions:
+    Status = "404-410"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self' api.themoviedb.org www.googletagmanager.com; script-src 'self' 'unsafe-inline' www.googletagmanager.com; style-src 'self' fonts.googleapis.com; img-src 'self' data: image.tmdb.org; font-src 'self' fonts.gstatic.com"
+    Permissions-Policy = "geolocation=(), microphone=()"
