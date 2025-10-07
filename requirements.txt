@@ -9,7 +9,7 @@ Flask-Cors==4.0.1
 
 # --- Database & ORM ---
 SQLAlchemy==2.0.36
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.9  # Essential fix for the C extension compatibility issue
 
 # --- Template & Utilities ---
 Werkzeug==3.1.3
