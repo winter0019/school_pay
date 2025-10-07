@@ -1,0 +1,92 @@
+{% extends "layout.html" %}
+
+{% block title %}All Payments{% endblock %}
+{% block page_title %}All Payments{% endblock %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+
+    <form method="GET" action="{{ url_for('payments') }}" class="flex gap-2 mb-6">
+        <input type="text" name="search" placeholder="Search student..." value="{{ request.args.get('search', '') }}"
+               class="flex-1 border rounded-lg p-2">
+        <select name="term" class="border rounded-lg p-2">
+            <option value="">All Terms</option>
+            <option value="First" {% if request.args.get('term') == 'First' %}selected{% endif %}>First Term</option>
+            <option value="Second" {% if request.args.get('term') == 'Second' %}selected{% endif %}>Second Term</option>
+            <option value="Third" {% if request.args.get('term') == 'Third' %}selected{% endif %}>Third Term</option>
+        </select>
+        <input type="text" name="session" placeholder="Session (e.g. 2025/2026)" value="{{ request.args.get('session', '') }}"
+               class="border rounded-lg p-2">
+        <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg shadow hover:bg-indigo-700">Search</button>
+    </form>
+
+    {% if pagination.total > 0 %}
+        <table class="w-full table-auto border-collapse">
+            <thead>
+                <tr class="bg-gray-100 text-left">
+                    <th class="p-3 border">Student</th>
+                    <th class="p-3 border">Amount</th>
+                    <th class="p-3 border">Term</th>
+                    <th class="p-3 border">Session</th>
+                    <th class="p-3 border">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in payments %}
+                <tr class="hover:bg-gray-50">
+                    <td class="p-3 border">{{ payment.student.name }}</td>
+                    <td class="p-3 border">₦{{ "{:,.2f}".format(payment.amount_paid) }}</td>
+                    <td class="p-3 border">{{ payment.term }}</td>
+                    <td class="p-3 border">{{ payment.session }}</td>
+                    <td class="p-3 border">{{ payment.payment_date.strftime('%d %b, %Y') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="mt-4 flex justify-between items-center">
+            <div>
+                Page {{ pagination.page }} of {{ pagination.pages }}
+            </div>
+            <nav class="flex space-x-2">
+                {% if pagination.has_prev %}
+                <a href="{{ url_for('payments', page=pagination.prev_num, search=search, term=term, session=session_year) }}" 
+                   class="px-3 py-1 bg-gray-200 rounded-lg hover:bg-gray-300">Previous</a>
+                {% endif %}
+                
+                {% for p in pagination.iter_pages() %}
+                    {% if p %}
+                        <a href="{{ url_for('payments', page=p, search=search, term=term, session=session_year) }}" 
+                           class="px-3 py-1 rounded-lg {% if p == pagination.page %}bg-indigo-600 text-white{% else %}bg-gray-200 hover:bg-gray-300{% endif %}">
+                           {{ p }}
+                        </a>
+                    {% else %}
+                        <span class="px-3 py-1">...</span>
+                    {% endif %}
+                {% endfor %}
+
+                {% if pagination.has_next %}
+                <a href="{{ url_for('payments', page=pagination.next_num, search=search, term=term, session=session_year) }}" 
+                   class="px-3 py-1 bg-gray-200 rounded-lg hover:bg-gray-300">Next</a>
+                {% endif %}
+            </nav>
+        </div>
+
+    {% elif students %}
+        <p class="text-gray-600 mb-4">No payments yet for this student:</p>
+        <ul class="list-disc list-inside">
+            {% for student in students %}
+                <li>
+                    {{ student.name }} – 
+                    <a href="{{ url_for('add_payment', student_id=student.id) }}"
+                       class="text-indigo-600 hover:underline">Add Payment</a>
+                </li>
+            {% endfor %}
+        </ul>
+
+    {% else %}
+        <p class="text-gray-600">No payments found. Try changing your filters.</p>
+    {% endif %}
+
+</div>
+{% endblock %}

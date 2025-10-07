@@ -1,0 +1,30 @@
+{% extends 'layout.html' %}
+
+{% block title %}Add Student{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto bg-white shadow rounded-lg p-6">
+  <h2 class="text-xl font-bold mb-4 text-gray-800">Add Student</h2>
+  <form method="POST" action="{{ url_for('add_student') }}" class="space-y-4">
+    <div>
+      <label class="block text-gray-700">Name</label>
+      <input type="text" name="name" required 
+             class="w-full border p-2 rounded-md focus:ring focus:ring-blue-300">
+    </div>
+    <div>
+      <label class="block text-gray-700">Registration Number</label>
+      <input type="text" name="reg_number" required 
+             class="w-full border p-2 rounded-md focus:ring focus:ring-blue-300">
+    </div>
+    <div>
+      <label class="block text-gray-700">Class</label>
+      <input type="text" name="student_class" required 
+             class="w-full border p-2 rounded-md focus:ring focus:ring-blue-300">
+    </div>
+    <button type="submit" 
+            class="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition">
+      Save Student
+    </button>
+  </form>
+</div>
+{% endblock %}

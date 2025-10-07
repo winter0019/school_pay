@@ -1,0 +1,106 @@
+{% extends 'layout.html' %}
+{% block title %}Manage Subscription{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto p-6 bg-white shadow-xl rounded-xl">
+    <h2 class="text-3xl font-extrabold text-gray-900 mb-6 border-b pb-2">
+        Manage Subscription
+    </h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="p-3 mb-4 rounded-lg text-white font-medium 
+                    {% if category == 'success' %}bg-green-500
+                    {% elif category == 'danger' %}bg-red-500
+                    {% else %}bg-blue-500{% endif %}" role="alert">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="space-y-6">
+        <div class="bg-indigo-50 p-6 rounded-lg border border-indigo-200">
+            <h3 class="text-xl font-semibold text-indigo-800 mb-3">Current Status</h3>
+            <p class="text-lg text-gray-700">
+                School: <span class="font-bold">{{ school.name }}</span>
+            </p>
+            <p class="text-lg mt-2">
+                Expiry Date: 
+                <span class="font-bold 
+                    {% if school.subscription_expiry.strftime('%Y-%m-%d') < today.strftime('%Y-%m-%d') %}text-red-600
+                    {% elif (school.subscription_expiry - today).days < 30 %}text-yellow-600
+                    {% else %}text-green-600{% endif %}">
+                    {{ school.subscription_expiry.strftime('%B %d, %Y') }}
+                </span>
+            </p>
+            {% set days_left = (school.subscription_expiry - today).days %}
+            <p class="text-sm text-gray-500 mt-1">
+                {% if days_left < 0 %}
+                    (Expired {{ days_left | abs }} days ago)
+                {% elif days_left < 30 %}
+                    (Subscription expires in {{ days_left }} days!)
+                {% else %}
+                    ({{ days_left }} days remaining)
+                {% endif %}
+            </p>
+        </div>
+        
+        <div class="bg-green-50 p-6 rounded-lg border border-green-200">
+            <h3 class="text-2xl font-semibold text-green-800 mb-4">Renew Subscription</h3>
+            <p class="text-gray-700 mb-4">
+                Pay the annual subscription fee of 
+                <span class="font-bold">₦{{ "{:,.2f}".format(subscription_amount) }}</span> securely online.
+            </p>
+            <button id="pay-button" 
+                    class="w-full sm:w-auto px-6 py-3 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 transition duration-150 transform hover:scale-[1.02]">
+                Renew Now
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('pay-button').addEventListener('click', async (event) => {
+        event.preventDefault();
+        
+        const button = event.target;
+        button.disabled = true;
+        button.textContent = 'Processing...';
+
+        try {
+            // FIX: Changed url_for('pay_with_paystack_subscription') to url_for('subscription')
+            const response = await fetch('{{ url_for("subscription") }}', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            // Check if response is JSON (needed because the backend route now redirects on success)
+            if (response.redirected) {
+                // The Flask route handled the Paystack initialization and immediately redirected to the Paystack URL
+                window.location.href = response.url;
+                return;
+            }
+
+            // Fallback for non-redirect (i.e., API errors returned as JSON)
+            const data = await response.json();
+
+            if (data.redirect_url) {
+                // This branch is only needed if the Flask route didn't redirect (but yours should)
+                window.location.href = data.redirect_url;
+            } else {
+                alert('Error: ' + (data.error || 'Payment initialization failed.'));
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert('An unexpected error occurred during payment processing.');
+        } finally {
+            button.disabled = false;
+            button.textContent = 'Renew Now';
+            // Note: The correct amount formatting is generally handled by the server on page load
+        }
+    });
+</script>
+{% endblock %}

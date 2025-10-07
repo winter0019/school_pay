@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SchoolPay{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .flash-message {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+        .active-link {
+            background-color: rgb(79, 70, 229); /* Indigo-600 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans leading-normal tracking-normal">
+
+    <div class="flash-message">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="p-4 rounded-md shadow-md text-sm text-white mb-2 {% if category == 'success' %}bg-green-500{% elif category == 'danger' %}bg-red-500{% else %}bg-blue-500{% endif %}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+    </div>
+
+    <div class="flex h-screen">
+        <aside class="bg-indigo-900 text-white w-64 p-4 space-y-4 shadow-lg">
+            <h1 class="text-2xl font-bold mb-6">School Admin</h1>
+            <nav>
+                <a href="{{ url_for('dashboard') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'dashboard' %}active-link{% endif %}">Dashboard</a>
+                <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'students' %}active-link{% endif %}">Students</a>
+                <a href="{{ url_for('payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'payments' %}active-link{% endif %}">Payments</a>
+                <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'add_payment' %}active-link{% endif %}">Add Payment</a>
+                <a href="{{ url_for('receipt_generator') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'receipt_generator' %}active-link{% endif %}">Receipt Generator</a>
+                
+                <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'pay_with_paystack_subscription' %}active-link{% endif %}">Subscription</a>
+                
+            </nav>
+            <a href="{{ url_for('logout') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-red-500 bg-red-600 text-center">Logout</a>
+        </aside>
+
+        <main class="flex-1 p-8 overflow-y-auto">
+            <div class="mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">{% block page_title %}{% endblock %}</h2>
+            </div>
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+</body>
+</html>

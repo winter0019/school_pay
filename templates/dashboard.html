@@ -1,0 +1,93 @@
+{% extends 'layout.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
+  <p class="text-gray-600">Welcome, {{ school.name }}. Here’s an overview of the school payment system.</p>
+
+  {% if not subscription_active %}
+    <div class="bg-red-100 text-red-700 p-4 rounded">
+      Your subscription has expired. Please 
+      <a href="{{ url_for('subscription') }}" class="underline">renew here</a>.
+    </div>
+  {% endif %}
+
+  <!-- School Logo Upload Section -->
+  <div class="bg-white shadow-lg rounded-lg p-6">
+    <h2 class="text-xl font-bold text-gray-700 mb-4">School Logo</h2>
+
+    {% if school.logo_path %}
+      <img src="{{ url_for('static', filename='logos/' + school.logo_path.split('/')[-1]) }}"
+           alt="School Logo"
+           class="w-32 h-32 object-contain mb-4 border rounded-lg shadow">
+    {% else %}
+      <p class="text-gray-500 mb-4">No logo uploaded yet.</p>
+    {% endif %}
+
+    <form action="{{ url_for('upload_logo') }}" method="POST" enctype="multipart/form-data" class="flex items-center gap-4">
+      <input type="file" name="logo" accept="image/*" class="border p-2 rounded-md">
+      <button type="submit"
+        class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition">
+        Upload Logo
+      </button>
+    </form>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-lg font-bold text-gray-700">Total Students</h2>
+      <p class="text-3xl font-extrabold text-indigo-700">{{ total_students or 0 }}</p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-lg font-bold text-gray-700">Payments This Term</h2>
+      <p class="text-3xl font-extrabold text-green-600">
+        ₦{{ "{:,.2f}".format(total_payments or 0) }}
+      </p>
+    </div>
+    <div class="bg-white shadow rounded-lg p-6">
+      <h2 class="text-lg font-bold text-gray-700">Outstanding Balance</h2>
+      <p class="text-3xl font-extrabold text-red-600">
+        ₦{{ "{:,.2f}".format(outstanding_balance or 0) }}
+      </p>
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-6">
+    <h2 class="text-xl font-bold text-gray-700 mb-4">Recent Payments</h2>
+    {% if recent_payments %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="bg-gray-100">
+            <th class="p-2 border">Student</th>
+            <th class="p-2 border">Date</th>
+            <th class="p-2 border">Amount</th>
+            <th class="p-2 border">Type</th>
+            <th class="p-2 border">Term</th>
+            <th class="p-2 border">Session</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in recent_payments %}
+          <tr class="border-t hover:bg-gray-50">
+            <td class="p-2">{{ p.student.name }}</td>
+            <td class="p-2">{{ p.payment_date.strftime('%Y-%m-%d') if p.payment_date else '' }}</td>
+            <td class="p-2">₦{{ "{:,.2f}".format(p.amount_paid or 0) }}</td>
+            <td class="p-2">{{ p.payment_type or '' }}</td>
+            <td class="p-2">{{ p.term or '' }}</td>
+            <td class="p-2">{{ p.session or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-gray-500">No recent payments yet.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

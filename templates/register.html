@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% block title %}Register - SchoolPay{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto bg-white shadow rounded-xl p-6">
+  <h2 class="text-2xl font-bold mb-4 text-center">Register Your School</h2>
+  <form method="POST">
+    <div class="mb-4">
+      <label>School Name</label>
+      <input type="text" name="school_name" required class="w-full border rounded p-2 mt-1">
+    </div>
+    <div class="mb-4">
+      <label>Email</label>
+      <input type="email" name="email" required class="w-full border rounded p-2 mt-1">
+    </div>
+    <div class="mb-4">
+      <label>Password</label>
+      <input type="password" name="password" required class="w-full border rounded p-2 mt-1">
+    </div>
+    <button class="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">Register</button>
+  </form>
+</div>
+{% endblock %}

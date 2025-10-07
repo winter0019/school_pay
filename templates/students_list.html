@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Students{% endblock %}
+{% block page_title %}Students{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Add Student Form -->
+  <div class="bg-white shadow rounded-lg p-6">
+    <h2 class="text-xl font-bold text-gray-700 mb-4">Add New Student</h2>
+    <form action="{{ url_for('students') }}" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <input type="text" name="name" placeholder="Full Name"
+             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
+      <input type="text" name="reg_number" placeholder="Reg Number"
+             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
+      <input type="text" name="student_class" placeholder="Class (e.g., JSS1, SS2)"
+             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
+      <div class="md:col-span-3">
+        <button type="submit"
+                class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700">
+          ➕ Add Student
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Student List -->
+  <div class="bg-white shadow rounded-lg p-6">
+    <h2 class="text-xl font-bold text-gray-700 mb-4">Student List</h2>
+    {% if students %}
+      <div class="overflow-x-auto">
+        <table class="w-full border-collapse">
+          <thead>
+            <tr class="bg-gray-100 text-left">
+              <th class="p-2 border">#</th>
+              <th class="p-2 border">Name</th>
+              <th class="p-2 border">Reg Number</th>
+              <th class="p-2 border">Class</th>
+              <th class="p-2 border">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for student in students %}
+            <tr class="border-t hover:bg-gray-50">
+              <td class="p-2">{{ loop.index }}</td>
+              <td class="p-2">{{ student.name }}</td>
+              <td class="p-2">{{ student.reg_number }}</td>
+              <td class="p-2">{{ student.student_class }}</td>
+              <td class="p-2">
+                <a href="#" class="text-blue-600 hover:underline">Edit</a> |
+                <a href="#" class="text-red-600 hover:underline">Delete</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-gray-500">No students have been added yet.</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

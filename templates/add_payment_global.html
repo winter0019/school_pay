@@ -1,0 +1,194 @@
+{% extends 'layout.html' %}
+{% block content %}
+<div class="max-w-lg mx-auto bg-white p-6 rounded-xl shadow-md">
+    <h2 class="text-2xl font-bold mb-6 text-center text-indigo-700">Record Payment</h2>
+
+    <form method="POST" id="payment-form" action="{{ url_for('add_payment') }}">
+
+        <div>
+            <input type="text" id="student-search" 
+                   placeholder="Search student by name or reg number"
+                   value="{% if student_to_prefill %}{{ student_to_prefill.name }} ({{ student_to_prefill.reg_number }}){% endif %}"
+                   class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                   {% if student_to_prefill %}readonly{% endif %}>
+            <ul id="search-results" 
+                class="border rounded mt-2 hidden max-h-48 overflow-y-auto bg-white shadow-md"></ul>
+            <input type="hidden" name="student_id" id="student_id"
+                   value="{% if student_to_prefill %}{{ student_to_prefill.id }}{% endif %}">
+        </div>
+
+        <div>
+            <label for="outstanding_balance" class="block text-sm font-bold text-gray-700 mb-1">Outstanding Balance (₦)</label>
+            <input type="number" step="0.01" name="outstanding_balance" id="outstanding_balance"
+                   placeholder="e.g. 50000.00"
+                   class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        </div>
+        
+        <div>
+            <input type="number" step="0.01" name="amount_paid" placeholder="Amount Paid (₦)"
+                   class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none" required>
+        </div>
+        <div>
+            <input type="text" name="payment_type" placeholder="Payment Type (e.g. Cash, Transfer)"
+                   class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none" required>
+        </div>
+        <div>
+            <select name="term" id="term-select" 
+                    class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none" required>
+                <option value="">Select Term</option>
+                <option value="First Term">First Term</option>
+                <option value="Second Term">Second Term</option>
+                <option value="Third Term">Third Term</option>
+            </select>
+        </div>
+        <div>
+            <input type="text" name="session" id="session-input" 
+                   placeholder="Session (e.g. 2024/2025)"
+                   class="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none" required>
+        </div>
+
+        <button type="submit" id="submit-btn" 
+                class="w-full bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition">
+            Save Payment
+        </button>
+    </form>
+</div>
+
+<div id="receipt-modal"
+     class="fixed inset-0 bg-gray-800 bg-opacity-70 flex items-center justify-center hidden">
+    <div class="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+        <h3 class="text-2xl font-bold mb-4 text-center text-indigo-700">Payment Receipt</h3>
+        <div id="receipt-details" class="text-sm space-y-1"></div>
+        <div class="flex justify-end mt-6">
+            <button id="close-receipt-modal"
+                    class="bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition">
+                Close
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const searchInput = document.getElementById("student-search");
+    const resultsList = document.getElementById("search-results");
+    const hiddenId = document.getElementById("student_id");
+    const studentInfoDiv = document.getElementById("student-info");
+    const studentNameSpan = document.getElementById("student-name");
+    const studentClassSpan = document.getElementById("student-class");
+    const paymentForm = document.getElementById("payment-form");
+    const submitBtn = document.getElementById("submit-btn");
+    const receiptModal = document.getElementById("receipt-modal");
+    const receiptDetails = document.getElementById("receipt-details");
+    const closeReceiptModal = document.getElementById("close-receipt-modal");
+    
+    // --- SEARCH STUDENTS ---
+    let debounceTimer;
+    searchInput.addEventListener("input", async function() {
+        clearTimeout(debounceTimer);
+        const q = this.value.trim();
+
+        if (q.length < 2) {
+            resultsList.innerHTML = "";
+            resultsList.classList.add("hidden");
+            studentInfoDiv.classList.add("hidden");
+            return;
+        }
+
+        debounceTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/search-students?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+
+                resultsList.innerHTML = "";
+                if (data.students.length > 0) {
+                    resultsList.classList.remove("hidden");
+                    data.students.forEach(s => {
+                        const li = document.createElement("li");
+                        li.textContent = `${s.name} (${s.reg_number})`;
+                        li.className = "p-2 hover:bg-indigo-100 cursor-pointer";
+                        li.onclick = () => {
+                            searchInput.value = `${s.name} (${s.reg_number})`;
+                            hiddenId.value = s.id;
+                            resultsList.classList.add("hidden");
+                            studentNameSpan.textContent = s.name;
+                            studentClassSpan.textContent = s.student_class;
+                            studentInfoDiv.classList.remove("hidden"); // Show student info on select
+                        };
+                        resultsList.appendChild(li);
+                    });
+                } else {
+                    resultsList.innerHTML = '<li class="p-2 text-red-500">No students found.</li>';
+                    resultsList.classList.remove("hidden");
+                    studentInfoDiv.classList.add("hidden");
+                }
+            } catch (err) {
+                alert("⚠️ Error searching students.");
+                resultsList.classList.add("hidden");
+                studentInfoDiv.classList.add("hidden");
+            }
+        }, 300);
+    });
+
+    // Hide results when clicking outside
+    document.addEventListener("click", (e) => {
+        if (!resultsList.contains(e.target) && e.target !== searchInput) {
+            resultsList.classList.add("hidden");
+        }
+    });
+
+    // --- HANDLE PAYMENT SUBMISSION ---
+    paymentForm.addEventListener("submit", async function(event) {
+        event.preventDefault();
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Saving...";
+
+        const formData = new FormData(paymentForm);
+
+        try {
+            const response = await fetch('/add-payment', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.error) {
+                alert(result.error);
+            } else {
+                receiptDetails.innerHTML = `
+                    <p><strong>Student:</strong> ${result.student_name}</p>
+                    <p><strong>Class:</strong> ${result.student_class}</p>
+                    <p><strong>Amount Paid:</strong> ₦${result.amount_paid.toFixed(2)}</p>
+                    <p><strong>Payment Type:</strong> ${result.payment_type}</p>
+                    <p><strong>Term:</strong> ${result.term}</p>
+                    <p><strong>Session:</strong> ${result.session}</p>
+                    <p><strong>Outstanding Balance:</strong> ₦${result.outstanding_balance !== null ? result.outstanding_balance.toFixed(2) : 'N/A'}</p>
+                    <p><strong>Date:</strong> ${result.date}</p>
+                `;
+                receiptModal.classList.remove("hidden");
+            }
+        } catch (err) {
+            alert("⚠️ Error saving payment. Please check your network connection.");
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = "Save Payment";
+        }
+    });
+
+    closeReceiptModal.addEventListener("click", () => {
+        receiptModal.classList.add("hidden");
+        paymentForm.reset();
+        studentInfoDiv.classList.add("hidden");
+        searchInput.value = ''; // Clear search input
+        searchInput.classList.remove('hidden'); // Show search input
+    });
+    
+    // Check on page load if student_id is pre-filled from URL
+    document.addEventListener('DOMContentLoaded', () => {
+        if (hiddenId.value) {
+            searchInput.classList.add('hidden');
+            studentInfoDiv.classList.remove('hidden');
+        }
+    });
+</script>
+{% endblock %}
