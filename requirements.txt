@@ -16,12 +16,13 @@ click==8.2.2
 python-dotenv==1.0.1
 reportlab==4.2.5
 openpyxl==3.1.5
-python-3.12.3
+python-3.12.6
 
 
 gunicorn==23.0.0
 
 psycopg2-binary==2.9.9 # Recommended PostgreSQL driver
 Pillow==10.3.0       # <-- REQUIRED FOR IMAGE HANDLING
+
 
 
