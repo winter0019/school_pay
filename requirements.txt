@@ -20,7 +20,8 @@ openpyxl==3.1.5
 gunicorn==23.0.0
 
 psycopg2-binary==2.9.9 # Recommended PostgreSQL driver
-Pillow==10.3.0       # <-- REQUIRED FOR IMAGE HANDLING
+Pillow==10.2.0 # <-- REQUIRED FOR IMAGE HANDLING
+
 
 
 
