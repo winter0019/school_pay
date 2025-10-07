@@ -5,10 +5,6 @@ from io import BytesIO
 import requests
 import json
 
-from flask import (
-    Flask, render_template, request, redirect, url_for,
-    session, send_file, flash, jsonify
-)
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -676,3 +672,4 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
