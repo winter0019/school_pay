@@ -682,7 +682,7 @@ def payments():
 
 ## Assuming this route exists in your app.py file
 
-# ---------------------------
+## ---------------------------
 # PAYMENT RECEIPT GENERATION
 # ---------------------------
 @app.route("/payment_receipt/<int:payment_id>")
@@ -838,6 +838,7 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
 
 
 
