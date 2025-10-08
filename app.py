@@ -67,6 +67,10 @@ class School(db.Model):
     logo_filename = db.Column(db.String(250), nullable=True)
     address = db.Column(db.String(250), nullable=True)
     phone_number = db.Column(db.String(50), nullable=True)
+    
+    # NEW FIELD for manually tracking total expected fees (stored in kobo/cents)
+    expected_fees_this_term = db.Column(db.Integer, default=0) 
+    
     students = db.relationship("Student", backref="school", lazy=True)
 
 class Student(db.Model):
@@ -676,3 +680,4 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
