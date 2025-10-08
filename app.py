@@ -547,6 +547,91 @@ def add_payment():
 
     return render_template("add_payment_global.html", student_to_prefill=student_to_prefill)
 
+
+# Add this route to your existing app.py file
+
+# ---------------------------
+# FEE STRUCTURE MANAGEMENT
+# ---------------------------
+@app.route("/fee-structure", methods=["GET", "POST"])
+@login_required
+def fee_structure():
+    school = current_school()
+    
+    if request.method == "POST":
+        class_name = request.form.get('class_name').strip()
+        expected_amount_naira = request.form.get('expected_amount').strip()
+        
+        if not class_name or not expected_amount_naira:
+            flash("Class name and expected amount are required.", "danger")
+            return redirect(url_for('fee_structure'))
+
+        try:
+            # Convert Naira input to kobo/cents
+            expected_amount_kobo = int(float(expected_amount_naira) * 100)
+            if expected_amount_kobo < 0:
+                 raise ValueError("Amount cannot be negative.")
+        except ValueError:
+            flash("Invalid amount entered.", "danger")
+            return redirect(url_for('fee_structure'))
+
+        # Check for existing structure for this class
+        existing_fee = FeeStructure.query.filter_by(
+            school_id=school.id, 
+            class_name=class_name
+        ).first()
+
+        if existing_fee:
+            # Update existing fee
+            existing_fee.expected_amount = expected_amount_kobo
+            db.session.commit()
+            flash(f"Fee structure for {class_name} updated successfully.", "success")
+        else:
+            # Create new fee
+            new_fee = FeeStructure(
+                school_id=school.id,
+                class_name=class_name,
+                expected_amount=expected_amount_kobo
+            )
+            db.session.add(new_fee)
+            db.session.commit()
+            flash(f"Fee structure for {class_name} created successfully.", "success")
+
+        return redirect(url_for('fee_structure'))
+
+    # GET Request: Display all fee structures
+    fee_structures = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.class_name).all()
+    
+    # Get a list of unique class names currently in use by students
+    active_classes = db.session.query(Student.student_class).filter_by(school_id=school.id).distinct().all()
+    active_classes = [c[0] for c in active_classes if c[0] is not None]
+    
+    return render_template("fee_structure.html", 
+                           fee_structures=fee_structures,
+                           active_classes=active_classes)
+
+# ---------------------------
+# FEE STRUCTURE DELETION
+# ---------------------------
+@app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
+@login_required
+def delete_fee_structure(fee_id):
+    school = current_school()
+    fee = db.session.get(FeeStructure, fee_id)
+    
+    if fee and fee.school_id == school.id:
+        class_name = fee.class_name
+        db.session.delete(fee)
+        db.session.commit()
+        flash(f"Fee structure for {class_name} deleted successfully.", "success")
+    else:
+        flash("Fee structure not found or access denied.", "danger")
+        
+    return redirect(url_for('fee_structure'))
+
+# ... rest of your app.py routes (like dashboard, settings, etc.)
+
+
 # ---------------------------
 # PAYMENTS (global listing + search/filter)
 # ---------------------------
@@ -725,6 +810,7 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
 
 
 
