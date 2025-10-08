@@ -466,43 +466,38 @@ def add_payment():
     if request.method == "POST":
         student_id = request.form.get("student_id")
         
-        # NOTE: student_count check for trial limits is correctly assumed to be handled 
-        
-        try:
-            # --- Input Validation and Student Retrieval ---
-            
-            if not student_id:
-                if request.accept_mimetypes.accept_json:
-                    return jsonify(error="No student selected."), 400
-                flash("No student selected.", "danger")
-                return redirect(url_for("add_payment"))
-            
-            try:
-                student_id = int(student_id)
-            except (ValueError, TypeError):
-                if request.accept_mimetypes.accept_json:
-                    return jsonify(error="Invalid student ID."), 400
-                flash("Invalid student ID.", "danger")
-                return redirect(url_for("add_payment"))
+        # NOTE: student_count check is not needed here if login_required handles trial
 
-            student = db.session.get(Student, student_id)
-            if not student or student.school_id != school.id:
-                if request.accept_mimetypes.accept_json:
-                    return jsonify(error="Student not found or access denied."), 404
-                flash("Student not found or access denied.", "danger")
-                return redirect(url_for("add_payment"))
+        if not student_id:
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="No student selected."), 400
+            flash("No student selected.", "danger")
+            return redirect(url_for("add_payment"))
             
-            # --- Payment Creation and Success Response ---
+        # --- Input validation for student_id ---
+        try:
+            student_id = int(student_id)
+        except (ValueError, TypeError):
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="Invalid student ID format."), 400
+            flash("Invalid student ID.", "danger")
+            return redirect(url_for("add_payment"))
+
+        student = db.session.get(Student, student_id)
+        if not student or student.school_id != school.id:
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="Student not found or access denied."), 404
+            flash("Student not found or access denied.", "danger")
+            return redirect(url_for("add_payment"))
             
-            # create_new_payment() is assumed to handle data conversion, model creation, 
-            # db.session.add(), and db.session.commit() successfully.
+        # --- Core Payment Logic with Error Catching ---
+        try:
             new_payment = create_new_payment(request.form, student)
             
             if new_payment:
-                # FIX: Explicitly returning 200 OK status for AJAX calls.
+                # SUCCESS RESPONSE FIX: Explicitly return 200 OK
                 if request.accept_mimetypes.accept_json:
                     return jsonify({
-                        "status": "success",  # Added status indicator for robust JS handling
                         "message": "Payment recorded successfully!",
                         "student_name": student.name,
                         "student_class": student.student_class,
@@ -510,30 +505,35 @@ def add_payment():
                         "payment_type": new_payment.payment_type,
                         "term": new_payment.term,
                         "session": new_payment.session,
-                        "date": new_payment.payment_date.strftime("%Y-%m-%d %H:%M")
-                    }), 200 # <-- Explicit 200 status code
+                        "date": new_payment.payment_date.strftime("%Y-%m-%d %H:%M"),
+                        # Added redirect URL for client-side navigation
+                        "redirect_url": url_for("payment_receipt", payment_id=new_payment.id)
+                    }), 200 # <-- CRITICAL: ADDED STATUS CODE 200
                 
-                # Standard web form submission redirect
+                # Standard (non-AJAX) success path
                 flash("Payment added successfully", "success")
                 return redirect(url_for("payment_receipt", payment_id=new_payment.id))
 
-            # Should only happen if create_new_payment returns None without an error
-            raise Exception("Payment object was not created.")
-
-        except Exception as e:
-            # Generalized error handling for robustness
-            db.session.rollback()
-            app.logger.error(f"FATAL Payment Error: {e}") 
-            
+            # If create_new_payment failed but didn't throw an exception (e.g., returned None)
             if request.accept_mimetypes.accept_json:
-                # Return 500 status for internal errors
-                return jsonify(error="Server error during payment processing. Check logs."), 500
-            
-            flash("An unexpected error occurred while saving the payment.", "danger")
+                 return jsonify(error="Payment creation failed internally."), 500
+            flash("Payment creation failed. Please check input values.", "danger")
             return redirect(url_for("add_payment"))
 
+        except Exception as e:
+            # If the database commit *succeeded* but something else failed afterward
+            # (which causes your current problem):
+            db.session.rollback()
+            app.logger.error(f"Critical error after payment save in add_payment route: {e}")
+            
+            if request.accept_mimetypes.accept_json:
+                 # This 500 response will trigger the client error message
+                 return jsonify(error="An unexpected server error occurred after transaction. Check server logs."), 500
+            
+            flash("An unexpected error occurred. Please try again.", "danger")
+            return redirect(url_for("add_payment"))
 
-    # --- GET Request Logic ---
+    # GET Request logic (unchanged)
     student_to_prefill = None
     student_id_from_url = request.args.get("student_id")
     if student_id_from_url:
@@ -810,6 +810,7 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
 
 
 
