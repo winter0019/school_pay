@@ -1,3 +1,4 @@
+update
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,9 +9,11 @@
 </head>
 <body class="bg-gray-100 font-sans">
 
-    <div class="flex min-h-screen">
+  <!-- Sidebar + Main Layout -->
+  <div class="flex min-h-screen">
 
-        <aside class="w-64 bg-blue-700 text-white flex flex-col">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-blue-700 text-white flex flex-col">
       <div class="p-6 text-2xl font-bold border-b border-blue-600">
         {{ school.name if school else "School App" }}
       </div>
@@ -18,7 +21,7 @@
         <a href="{{ url_for('dashboard') }}" class="block px-4 py-2 rounded hover:bg-blue-600">📊 Dashboard</a>
         <a href="{{ url_for('students') }}" class="block px-4 py-2 rounded hover:bg-blue-600">👩‍🎓 Students</a>
         <a href="{{ url_for('payments') }}" class="block px-4 py-2 rounded hover:bg-blue-600">💳 Payments</a>
-        <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block px-4 py-2 rounded hover:bg-blue-600">📝 Subscription</a>
+        <a href="{{ url_for('subscription') }}" class="block px-4 py-2 rounded hover:bg-blue-600">📝 Subscription</a>
         <a href="{{ url_for('settings') }}" class="block px-4 py-2 rounded hover:bg-blue-600">⚙️ Settings</a>
       </nav>
       <div class="p-4 border-t border-blue-600">
@@ -28,14 +31,17 @@
       </div>
     </aside>
 
-        <div class="flex-1 flex flex-col">
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col">
       
-            <header class="bg-white shadow p-4 flex justify-between items-center">
+      <!-- Topbar -->
+      <header class="bg-white shadow p-4 flex justify-between items-center">
         <h1 class="text-xl font-bold">{% block page_title %}{% endblock %}</h1>
         <span class="text-gray-600">Welcome, {{ school.name if school else "Admin" }}</span>
       </header>
 
-            <div class="p-4">
+      <!-- Flash messages -->
+      <div class="p-4">
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             <div class="space-y-2">
@@ -52,7 +58,8 @@
         {% endwith %}
       </div>
 
-            <main class="flex-1 p-6">
+      <!-- Page Content -->
+      <main class="flex-1 p-6">
         {% block content %}{% endblock %}
       </main>
     </div>
