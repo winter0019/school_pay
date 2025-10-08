@@ -1,59 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}SchoolPay{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .flash-message {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            z-index: 1000;
-        }
-        .active-link {
-            background-color: rgb(79, 70, 229); /* Indigo-600 */
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}School Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 font-sans leading-normal tracking-normal">
+<body class="bg-gray-100 font-sans">
 
-    <div class="flash-message">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-            <div class="p-4 rounded-md shadow-md text-sm text-white mb-2 {% if category == 'success' %}bg-green-500{% elif category == 'danger' %}bg-red-500{% else %}bg-blue-500{% endif %}">
-                {{ message }}
-            </div>
-            {% endfor %}
-        {% endif %}
-        {% endwith %}
-    </div>
+    <div class="flex min-h-screen">
 
-    <div class="flex h-screen">
-        <aside class="bg-indigo-900 text-white w-64 p-4 space-y-4 shadow-lg">
-            <h1 class="text-2xl font-bold mb-6">School Admin</h1>
-            <nav>
-                <a href="{{ url_for('dashboard') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'dashboard' %}active-link{% endif %}">Dashboard</a>
-                <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'students' %}active-link{% endif %}">Students</a>
-                <a href="{{ url_for('payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'payments' %}active-link{% endif %}">Payments</a>
-                <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'add_payment' %}active-link{% endif %}">Add Payment</a>
-                <a href="{{ url_for('receipt_generator') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'receipt_generator' %}active-link{% endif %}">Receipt Generator</a>
-                
-                <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if request.endpoint == 'pay_with_paystack_subscription' %}active-link{% endif %}">Subscription</a>
-                
-            </nav>
-            <a href="{{ url_for('logout') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-red-500 bg-red-600 text-center">Logout</a>
-        </aside>
+        <aside class="w-64 bg-indigo-900 text-white flex flex-col">
+      <div class="p-6 text-2xl font-bold border-b border-indigo-800">
+        School Admin
+      </div>
+      <nav class="flex-1 p-4 space-y-2">
+        <a href="{{ url_for('dashboard') }}" class="block px-4 py-2 rounded hover:bg-indigo-700">📊 Dashboard</a>
+        <a href="{{ url_for('students') }}" class="block px-4 py-2 rounded hover:bg-indigo-700">👩‍🎓 Students</a>
+        <a href="{{ url_for('payments') }}" class="block px-4 py-2 rounded hover:bg-indigo-700">💳 Payments</a>
+        <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block px-4 py-2 rounded hover:bg-indigo-700">📝 Subscription</a>
+        <a href="{{ url_for('settings') }}" class="block px-4 py-2 rounded hover:bg-indigo-700">⚙️ Settings</a>
+      </nav>
+      <div class="p-4 border-t border-indigo-800">
+        <a href="{{ url_for('logout') }}" class="block px-4 py-2 bg-red-600 rounded text-center hover:bg-red-700">
+          🚪 Logout
+        </a>
+      </div>
+    </aside>
 
-        <main class="flex-1 p-8 overflow-y-auto">
-            <div class="mb-6">
-                <h2 class="text-3xl font-bold text-gray-800">{% block page_title %}{% endblock %}</h2>
-            </div>
-            {% block content %}{% endblock %}
-        </main>
-    </div>
+        <div class="flex-1 flex flex-col">
+      
+            <header class="bg-white shadow p-4 flex justify-between items-center">
+        <h1 class="text-xl font-bold">{% block page_title %}{% endblock %}</h1>
+        <span class="text-gray-600">Welcome, Admin</span>
+      </header>
+
+            <div class="p-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="space-y-2">
+              {% for category, message in messages %}
+                <div class="p-3 rounded 
+                  {% if category == 'success' %} bg-green-100 text-green-700 
+                  {% elif category == 'error' %} bg-red-100 text-red-700 
+                  {% else %} bg-gray-100 text-gray-700 {% endif %}">
+                  {{ message }}
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+      </div>
+
+            <main class="flex-1 p-6">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
 
 </body>
 </html>
