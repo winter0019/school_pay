@@ -40,6 +40,17 @@
       <input type="tel" name="phone_number" value="{{ school.phone_number or '' }}"
              class="w-full border rounded-lg p-2 mt-1 focus:ring focus:ring-indigo-200">
     </div>
+    
+    {# START OF NEW FIELD: Expected Total Fees This Term #}
+    <div>
+        <label class="block text-gray-700 font-medium">Expected Total Fees This Term (₦)</label>
+        {# Display the value in Naira by dividing the kobo/cents amount by 100 #}
+        {% set display_amount = (school.expected_fees_this_term / 100) if school.expected_fees_this_term else 0 %}
+        <input type="number" name="expected_fees_this_term" value="{{ display_amount | round(0) }}"
+               class="w-full border rounded-lg p-2 mt-1 focus:ring focus:ring-indigo-200" step="any" required>
+        <p class="text-xs text-gray-500 mt-1">Enter the total expected fees for all students for the current term/session.</p>
+    </div>
+    {# END OF NEW FIELD #}
 
     <div>
       <label class="block text-gray-700 font-medium">Upload Logo</label>
