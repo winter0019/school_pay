@@ -238,29 +238,46 @@ def logout():
 @login_required
 def dashboard():
     school = current_school()
+    
     total_students = Student.query.filter_by(school_id=school.id).count()
-    total_payments = (db.session.query(db.func.sum(Payment.amount_paid))
-                     .join(Student)
-                     .filter(Student.school_id == school.id)
-                     .scalar()) or 0.0
+    
+    # Total payments made (stored in kobo/cents)
+    total_payments_kobo = (db.session.query(db.func.sum(Payment.amount_paid))
+                           .join(Student)
+                           .filter(Student.school_id == school.id)
+                           .scalar()) or 0
+                           
     recent_payments = (Payment.query.join(Student)
-                       .filter(Student.school_id == school.id)
-                       .order_by(Payment.payment_date.desc())
-                       .limit(5)
-                       .all())
-    total_fees = (db.session.query(db.func.sum(Fee.amount))
-                  .filter(Fee.school_id == school.id)
-                  .scalar()) or 0.0
-    outstanding_balance = total_fees - total_payments
+                        .filter(Student.school_id == school.id)
+                        .order_by(Payment.payment_date.desc())
+                        .limit(5)
+                        .all())
+                        
+    # ----------------------------------------------------
+    # FIX: Calculate Outstanding Balance using Manual Input
+    # ----------------------------------------------------
+    
+    # 1. Get the manually entered expected fees (stored in kobo/cents)
+    expected_fees_kobo = school.expected_fees_this_term or 0
+    
+    # 2. Calculate the outstanding balance (still in kobo/cents)
+    outstanding_balance_kobo = expected_fees_kobo - total_payments_kobo
+    
+    # Ensure the balance is not negative (if the school has been overpaid)
+    if outstanding_balance_kobo < 0:
+        outstanding_balance_kobo = 0
+        
+    # ----------------------------------------------------
+
     return render_template(
         "dashboard.html",
         total_students=total_students,
-        total_payments=total_payments,
+        # Pass the calculated kobo/cent values
+        total_payments=total_payments_kobo, 
+        outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
-        outstanding_balance=outstanding_balance,
         school=school,
     )
-
 # ---------------------------
 # LOGO UPLOAD
 # ---------------------------
@@ -680,4 +697,5 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
 
