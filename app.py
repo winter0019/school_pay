@@ -680,29 +680,57 @@ def payments():
         session_year=session_year,
     )
 
+## Assuming this route exists in your app.py file
+
 # ---------------------------
-# RECEIPT GENERATOR
+# PAYMENT RECEIPT GENERATION
 # ---------------------------
-@app.route("/receipt-generator", methods=["GET"])
+@app.route("/payment_receipt/<int:payment_id>")
 @login_required
-def receipt_generator():
-    search_query = request.args.get('search_query', '').strip()
-    search_results = []
+def payment_receipt(payment_id):
+    school = current_school()
     
-    if search_query:
-        students = Student.query.filter(
-            Student.school_id == current_school().id,
-            db.or_(
-                Student.name.ilike(f"%{search_query}%"),
-                Student.reg_number.ilike(f"%{search_query}%")
-            )
-        ).limit(10).all()
+    # 1. Get the current payment
+    payment = db.session.get(Payment, payment_id)
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment receipt not found or access denied.", "danger")
+        return redirect(url_for('dashboard'))
 
-        for student in students:
-            student.payments = Payment.query.filter_by(student_id=student.id).order_by(Payment.payment_date.desc()).all()
-            search_results.append(student)
+    student = payment.student
+    student_class = student.student_class
 
-    return render_template("receipt_generator.html", search_results=search_results)
+    # 2. Get the expected fee for the student's class from FeeStructure
+    expected_fee_structure = FeeStructure.query.filter_by(
+        school_id=school.id,
+        class_name=student_class
+    ).first()
+    
+    # Default expected amount to 0 if no fee structure is defined for the class
+    expected_amount_kobo = expected_fee_structure.expected_amount if expected_fee_structure else 0
+
+    # 3. Calculate total payments made by this student (all payments linked to this student)
+    total_paid_kobo = db.session.query(db.func.sum(Payment.amount_paid)). \
+        filter(Payment.student_id == student.id). \
+        scalar() or 0
+        
+    # 4. Calculate outstanding balance
+    outstanding_balance_kobo = expected_amount_kobo - total_paid_kobo
+    
+    # Ensure outstanding balance is not negative (in case of overpayment)
+    if outstanding_balance_kobo < 0:
+        outstanding_balance_kobo = 0
+
+    # 5. Pass all calculated values to the template
+    return render_template(
+        "payment_receipt.html",
+        payment=payment,
+        student=student,
+        expected_amount=expected_amount_kobo,
+        total_paid=total_paid_kobo,
+        outstanding_balance=outstanding_balance_kobo
+    )
+
+# ... rest of your app.py routes
 
 # ---------------------------
 # RECEIPT (HTML preview) + PDF download
@@ -810,6 +838,7 @@ if __name__ == "__main__":
         # We keep db.create_all() here only for quick local setup (if no migrations are used).
         db.create_all()
     app.run(debug=True)
+
 
 
 
