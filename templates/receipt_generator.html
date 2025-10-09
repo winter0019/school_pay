@@ -1,9 +1,10 @@
 {% extends 'layout.html' %}
 {% block content %}
+
 <div class="container mx-auto p-6">
     <h1 class="text-3xl font-bold text-gray-800 mb-6">Receipt Generator</h1>
 
-    <form method="GET" action="{{ url_for('receipt_generator') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden">
+    <form method="GET" action="{{ url_for('view_receipt_html') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden">
         <input 
             type="text" 
             name="search_query" 
@@ -85,5 +86,6 @@
             <p class="mt-2">💡 Tip: Double-check spelling or spacing in your search.</p>
         </div>
     {% endif %}
+
 </div>
 {% endblock %}
