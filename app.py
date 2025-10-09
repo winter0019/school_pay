@@ -791,165 +791,269 @@ def delete_fee_structure(fee_id):
 @trial_required # NEW: Enforce time-based trial restriction
 def payments():
     school = current_school()
-    search = request.args.get("search", "").strip()
-    term = request.args.get("term", "").strip()
-    session_year = request.args.get("session", "").strip()
-    page = request.args.get("page", 1, type=int)
 
-    query = Payment.query.join(Student).filter(Student.school_id == school.id)
+    # Get filter parameters from the request
+    search_query = request.args.get("q", "").strip()
+    term_filter = request.args.get("term", "").strip()
+    session_filter = request.args.get("session", "").strip()
 
-    if search:
-        query = query.filter(
+    # Start building the base query: Payments belonging to the school
+    payments_query = Payment.query.join(Student).filter(
+        Student.school_id == school.id
+    )
+
+    # Apply search filter (by student name or registration number)
+    if search_query:
+        payments_query = payments_query.filter(
             db.or_(
-                Student.name.ilike(f"%{search}%"),
-                Student.reg_number.ilike(f"%{search}%")
+                Student.name.ilike(f"%{search_query}%"),
+                Student.reg_number.ilike(f"%{search_query}%")
             )
         )
-    if term:
-        query = query.filter(Payment.term == term)
-    if session_year:
-        query = query.filter(Payment.session == session_year)
+
+    # Apply term filter
+    if term_filter:
+        payments_query = payments_query.filter(Payment.term == term_filter)
+
+    # Apply session filter
+    if session_filter:
+        payments_query = payments_query.filter(Payment.session == session_filter)
+
+    # Order by payment date (most recent first) and execute
+    payments_list = payments_query.order_by(Payment.payment_date.desc()).all()
     
-    # --- COMPLETED PAGINATION LOGIC ---
-    payments_paginated = query.order_by(Payment.payment_date.desc()).paginate(
-        page=page, per_page=10, error_out=False
-    )
+    # Get unique terms and sessions for filter dropdowns
+    terms = db.session.query(Payment.term).filter(Student.school_id == school.id).distinct().order_by(Payment.term).all()
+    sessions = db.session.query(Payment.session).filter(Student.school_id == school.id).distinct().order_by(Payment.session).all()
     
-    # Collect unique terms and sessions for filter dropdowns
-    available_terms = db.session.query(Payment.term).filter(
-        Payment.student_id.in_(db.session.query(Student.id).filter_by(school_id=school.id))
-    ).distinct().order_by(Payment.term.asc()).all()
-    
-    available_sessions = db.session.query(Payment.session).filter(
-        Payment.student_id.in_(db.session.query(Student.id).filter_by(school_id=school.id))
-    ).distinct().order_by(Payment.session.desc()).all()
+    # Flatten the lists of tuples
+    terms = [t[0] for t in terms]
+    sessions = [s[0] for s in sessions]
 
     return render_template(
         "payments.html",
-        payments=payments_paginated,
-        search=search,
-        selected_term=term,
-        selected_session=session_year,
-        available_terms=[t[0] for t in available_terms if t[0]],
-        available_sessions=[s[0] for s in available_sessions if s[0]]
+        payments=payments_list,
+        search_query=search_query,
+        term_filter=term_filter,
+        session_filter=session_filter,
+        terms=terms,
+        sessions=sessions
     )
-    
+
 # ---------------------------
-# PAYMENT RECEIPT & PDF GENERATION
+# PAYMENT RECEIPT GENERATOR (PDF Download)
 # ---------------------------
-@app.route("/payment-receipt/<int:payment_id>")
-@login_required
-@trial_required
-def payment_receipt(payment_id):
-    school = current_school()
-    payment = db.session.get(Payment, payment_id)
-
-    if not payment or payment.student.school_id != school.id:
-        flash("Payment receipt not found.", "danger")
-        return redirect(url_for("payments"))
-
-    return render_template("payment_receipt.html", payment=payment, school=school)
-
-@app.route("/generate-receipt/<int:payment_id>")
+@app.route("/generate-receipt/<int:payment_id>", methods=["GET"])
 @login_required
 @trial_required
 def generate_receipt(payment_id):
+    """Generates a PDF receipt for a specific payment."""
     school = current_school()
     payment = db.session.get(Payment, payment_id)
 
     if not payment or payment.student.school_id != school.id:
-        flash("Payment receipt not found.", "danger")
-        return redirect(url_for("payments"))
+        flash("Receipt not found or access denied.", "danger")
+        return redirect(url_for("dashboard"))
 
-    # Create a BytesIO buffer to hold the PDF data
+    # Create the buffer for the PDF file
     buffer = BytesIO()
     p = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    margin = 50
+    width, height = A4 # A4 is (595.27, 841.89)
 
-    # --- Draw Receipt ---
+    # --- Header Information ---
+    logo_path = get_logo_path(school)
+    if logo_path and os.path.exists(logo_path):
+        try:
+            # Draw logo (resized to fit, e.g., 50x50)
+            logo_width, logo_height = 50, 50
+            x_pos = 50
+            y_pos = height - 60
+            p.drawImage(logo_path, x_pos, y_pos, width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except Exception as e:
+            app.logger.error(f"Error drawing logo: {e}")
+            # Fallback text if logo fails
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(50, height - 50, school.name)
+            
+            
+    # School Info (right-aligned)
+    p.setFont("Helvetica-Bold", 16)
+    school_name_text = school.name
+    school_name_width = p.stringWidth(school_name_text, "Helvetica-Bold", 16)
+    p.drawString(width - 50 - school_name_width, height - 50, school_name_text)
     
-    # Title Box/Border
-    p.setFillColor(colors.lightgrey)
-    p.rect(margin, height - 120, width - 2 * margin, 80, fill=1)
-    
-    # Header
-    p.setFillColor(colors.black)
-    p.setFont("Helvetica-Bold", 18)
-    p.drawCentredString(width / 2, height - 70, f"OFFICIAL PAYMENT RECEIPT")
-    p.setFont("Helvetica-Bold", 14)
-    p.drawCentredString(width / 2, height - 90, school.name.upper())
-
-    # School Details (Right Side)
-    p.setFont("Helvetica", 9)
-    p.drawString(width - 150, height - 50, f"Email: {school.email}")
-    p.drawString(width - 150, height - 62, f"Phone: {school.phone_number or 'N/A'}")
-    p.drawString(width - 150, height - 74, f"Address: {school.address or 'N/A'}")
-
-    # Receipt Number and Date
     p.setFont("Helvetica", 10)
-    p.drawString(margin, height - 150, f"Receipt No: {payment.id:06}")
-    p.drawString(margin, height - 165, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
-
-    # Student Details
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(margin, height - 200, "PAYMENT FOR:")
-    p.setFont("Helvetica", 12)
-    y_pos = height - 220
-    p.drawString(margin, y_pos, f"Student Name: {payment.student.name}")
-    p.drawString(width / 2, y_pos, f"Reg. No: {payment.student.reg_number}")
-    p.drawString(margin, y_pos - 20, f"Class: {payment.student.student_class}")
-    p.drawString(width / 2, y_pos - 20, f"For Term: {payment.term} ({payment.session})")
-
-    # Payment Table Header
-    table_y = height - 300
-    p.setFont("Helvetica-Bold", 12)
-    p.setFillColor(colors.darkgreen)
-    p.rect(margin, table_y - 20, width - 2 * margin, 20, fill=1)
-    p.setFillColor(colors.white)
-    p.drawString(margin + 10, table_y - 15, "DESCRIPTION")
-    p.drawString(width - 150, table_y - 15, "AMOUNT (NGN)")
     
-    # Payment Row
+    # Draw Address and Phone
+    address_text = school.address or "No address provided"
+    phone_text = school.phone_number or "No phone provided"
+    
+    p.drawString(width - 50 - p.stringWidth(address_text, "Helvetica", 10), height - 65, address_text)
+    p.drawString(width - 50 - p.stringWidth(phone_text, "Helvetica", 10), height - 80, phone_text)
+
+
+    # --- Receipt Title ---
+    p.setFont("Helvetica-Bold", 20)
+    p.drawCentredString(width / 2, height - 120, "Official Payment Receipt")
+
+    # --- Receipt Details Box ---
+    y_start = height - 160
+    box_left = 50
+    box_right = width - 50
+    box_height = 70
+    p.setFillColor(colors.lightgrey)
+    p.rect(box_left, y_start - box_height, box_right - box_left, box_height, fill=1)
     p.setFillColor(colors.black)
-    p.setFont("Helvetica", 12)
-    p.drawString(margin + 10, table_y - 45, f"School Fees Payment ({payment.payment_type})")
-    
-    # Amount (stored as Naira/float)
-    amount_str = f"{payment.amount_paid:,.2f}"
-    p.drawString(width - 150, table_y - 45, amount_str)
-    
-    # Total
-    p.setStrokeColor(colors.darkgreen)
-    p.setLineWidth(2)
-    p.line(width - 200, table_y - 65, width - margin, table_y - 65)
-    
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(margin + 10, table_y - 85, "TOTAL PAID:")
-    p.drawString(width - 150, table_y - 85, amount_str)
 
-    # Footer
+    p.setFont("Helvetica", 12)
+    
+    # Receipt No. / Date
+    receipt_no = f"REC-{payment.id}-{payment.payment_date.strftime('%Y%m%d')}"
+    p.drawString(box_left + 10, y_start - 20, f"Receipt No: {receipt_no}")
+    p.drawString(box_right - 10 - p.stringWidth(f"Date: {payment.payment_date.strftime('%B %d, %Y')}", "Helvetica", 12), y_start - 20, f"Date: {payment.payment_date.strftime('%B %d, %Y')}")
+
+    # Payment Type
+    p.drawString(box_left + 10, y_start - 40, f"Payment Type: {payment.payment_type}")
+    
+    # Student Info
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(50, height - 250, "Student Details")
+    p.line(50, height - 255, width - 50, height - 255)
+
+    p.setFont("Helvetica", 12)
+    p.drawString(50, height - 270, f"Name: {payment.student.name}")
+    p.drawString(50, height - 290, f"Reg Number: {payment.student.reg_number}")
+    p.drawString(50, height - 310, f"Class: {payment.student.student_class}")
+
+
+    # --- Payment Breakdown ---
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(50, height - 370, "Transaction Details")
+    p.line(50, height - 375, width - 50, height - 375)
+    
+    # Column Headers
+    y_detail = height - 395
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_detail, "Description")
+    p.drawString(300, y_detail, "Term / Session")
+    p.drawString(480, y_detail, "Amount Paid")
+
+    # Payment Data
+    y_data = height - 415
+    p.setFont("Helvetica", 12)
+    
+    description = "School Fees Payment"
+    term_session = f"{payment.term} / {payment.session}"
+    
+    # Define a local formatting function to handle currency display in PDF
+    def format_naira(value):
+        try:
+            return f"₦{float(value):,.2f}"
+        except (ValueError, TypeError):
+            return "N/A"
+            
+    amount_paid_formatted = format_naira(payment.amount_paid)
+
+    p.drawString(50, y_data, description)
+    p.drawString(300, y_data, term_session)
+    p.drawString(480, y_data, amount_paid_formatted)
+    
+    
+    # --- Total Paid Section ---
+    total_y = y_data - 40
+    p.line(400, total_y + 10, width - 50, total_y + 10) # Separator line
+
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(380, total_y, "TOTAL:")
+    
+    # Ensure this uses the same formatting as the detail line
+    p.drawString(480, total_y, amount_paid_formatted)
+
+    # --- Footer ---
     p.setFont("Helvetica-Oblique", 10)
-    p.setFillColor(colors.grey)
-    p.drawString(margin, 50, "This is a computer-generated receipt. Thank you for your payment.")
+    p.drawCentredString(width / 2, 50, "Thank you for your prompt payment.")
+    p.drawCentredString(width / 2, 35, f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} by SchoolPay")
 
     p.showPage()
     p.save()
 
-    # Move buffer position to the beginning
     buffer.seek(0)
-    
-    filename = f"receipt_{payment.student.reg_number}_{payment_id}.pdf"
-    
-    # Send the PDF file to the client
     return send_file(
         buffer,
-        download_name=filename,
-        mimetype="application/pdf",
-        as_attachment=True
+        as_attachment=True,
+        download_name=f"Receipt-{receipt_no}.pdf",
+        mimetype="application/pdf"
     )
 
+# ---------------------------
+# PAYMENT RECEIPT DISPLAY
+# ---------------------------
+@app.route("/payment-receipt/<int:payment_id>", methods=["GET"])
+@login_required
+@trial_required
+def payment_receipt(payment_id):
+    """Displays a simple HTML view of the receipt before downloading."""
+    school = current_school()
+    payment = db.session.get(Payment, payment_id)
+
+    if not payment or payment.student.school_id != school.id:
+        flash("Receipt not found or access denied.", "danger")
+        return redirect(url_for("dashboard"))
+        
+    # Get outstanding balance for this student, term, and session
+    student = payment.student
+    term = payment.term
+    session_year = payment.session
+    
+    # 1. Get expected fee from FeeStructure (in kobo/cents)
+    fee_structure = FeeStructure.query.filter_by(
+        school_id=school.id,
+        class_name=student.student_class
+    ).first()
+    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0
+    
+    # 2. Calculate total paid for this term/session (Payment.amount_paid is Naira/Primary Currency)
+    total_paid_naira_query = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
+        student_id=student.id,
+        term=term,
+        session=session_year
+    ).scalar()
+    total_paid_naira = total_paid_naira_query or 0.0
+    total_paid_kobo = int(total_paid_naira * 100)
+    
+    # 3. Calculate outstanding (in kobo/cents)
+    outstanding_kobo = expected_amount_kobo - total_paid_kobo
+    outstanding_kobo = max(0, outstanding_kobo)
+    
+    
+    return render_template(
+        "receipt_view.html",
+        school=school,
+        payment=payment,
+        expected_amount_kobo=expected_amount_kobo,
+        total_paid_kobo=total_paid_kobo,
+        outstanding_kobo=outstanding_kobo
+    )
+
+# ---------------------------
+# ERROR HANDLERS
+# ---------------------------
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    app.logger.error(f"Server Error: {e}")
+    db.session.rollback()
+    return render_template('500.html'), 500
+
+# ---------------------------
+# INITIALIZATION
+# ---------------------------
 if __name__ == "__main__":
     with app.app_context():
+        # This is for local development running directly, 
+        # but Render/gunicorn usually handles `flask run` which initializes things differently.
         db.create_all()
     app.run(debug=True)
