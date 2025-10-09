@@ -781,7 +781,7 @@ def payment_receipt(payment_id):
 
     # 5. Pass all calculated values to the template
     return render_template(
-        "payment_receipt.html",
+        "receipt.html",
         payment=payment,
         student=student,
         expected_amount=expected_amount_kobo,
@@ -869,5 +869,6 @@ if __name__ == "__main__":
         # db.create_all() 
         pass 
     app.run(debug=True)
+
 
 
