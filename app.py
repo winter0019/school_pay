@@ -755,29 +755,40 @@ def payment_receipt(payment_id):
 
     student = payment.student
     student_class = student.student_class
+    
+    # --- CRITICAL FILTER VALUES ---
+    current_term = payment.term
+    current_session = payment.session
 
-    # 2. Get the expected fee for the student's class from FeeStructure (in kobo/cents)
+    # 2. Get the expected fee for the student's class and period (in kobo/cents)
+    #    NOTE: You must ensure FeeStructure accounts for Term/Session if fees change.
     expected_fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student_class
+        # Consider adding term=current_term and session=current_session to the filter
     ).first()
     
     # Default expected amount to 0 if no fee structure is defined for the class
     expected_amount_kobo = expected_fee_structure.expected_amount if expected_fee_structure else 0
 
-    # 3. Calculate total payments made by this student (all payments linked to this student)
-    # Payment.amount_paid is in Naira/Primary Currency. Convert to kobo for consistency with FeeStructure.
+    # 3. Calculate total payments made for THIS TERM/SESSION ONLY (in Naira)
     total_paid_naira = db.session.query(db.func.sum(Payment.amount_paid)). \
-        filter(Payment.student_id == student.id). \
+        filter(
+            Payment.student_id == student.id,
+            # *** ADDED FILTERS: ONLY SUM PAYMENTS FOR THE CURRENT TERM/SESSION ***
+            Payment.term == current_term,
+            Payment.session == current_session
+        ). \
         scalar() or 0
+        
+    # Convert total paid amount to kobo for calculation consistency
     total_paid_kobo = int(total_paid_naira * 100)
         
     # 4. Calculate outstanding balance
     outstanding_balance_kobo = expected_amount_kobo - total_paid_kobo
     
     # Ensure outstanding balance is not negative (in case of overpayment)
-    if outstanding_balance_kobo < 0:
-        outstanding_balance_kobo = 0
+    outstanding_balance_kobo = max(0, outstanding_balance_kobo)
 
     # 5. Pass all calculated values to the template
     return render_template(
@@ -788,7 +799,6 @@ def payment_receipt(payment_id):
         total_paid=total_paid_kobo,
         outstanding_balance=outstanding_balance_kobo
     )
-
 # ---------------------------
 # RECEIPT (HTML preview) - RENAMED TO FIX CONFLICT
 # ---------------------------
@@ -869,6 +879,7 @@ if __name__ == "__main__":
         # db.create_all() 
         pass 
     app.run(debug=True)
+
 
 
 
