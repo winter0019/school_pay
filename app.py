@@ -734,7 +734,7 @@ def receipt_generator():
                                            .order_by(Payment.payment_date.desc())\
                                            .limit(5).all() # Limit to 5 recent payments
     
-    return render_template('receipt.htmll', 
+    return render_template('receipt.html', 
                            students_list=students_list, 
                            search_query=search_query)
 
@@ -869,6 +869,7 @@ if __name__ == "__main__":
         # db.create_all() 
         pass 
     app.run(debug=True)
+
 
 
 
