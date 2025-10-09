@@ -1,22 +1,61 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="max-w-xl mx-auto mt-10 bg-white shadow-lg rounded-2xl p-8">
-  <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Payment Receipt</h2>
+    <h2 class="text-2xl font-bold text-indigo-700 mb-6 text-center border-b pb-2">Payment Receipt</h2>
 
-  <div class="space-y-3 text-gray-700">
-    <p><strong>Student:</strong> {{ payment.student.full_name }}</p>
-    <p><strong>Amount Paid:</strong> ₦{{ payment.amount_paid }}</p>
-    <p><strong>Payment Type:</strong> {{ payment.payment_type }}</p>
-    <p><strong>Term:</strong> {{ payment.term }}</p>
-    <p><strong>Session:</strong> {{ payment.session }}</p>
-    <p><strong>Date:</strong> {{ payment.payment_date.strftime('%Y-%m-%d') }}</p>
-  </div>
+    <div class="space-y-3 text-gray-700 mb-6 border-b pb-4">
+        <p><strong>Student:</strong> {{ payment.student.full_name }}</p>
+        <p><strong>Class:</strong> {{ payment.student.student_class }}</p>
+        <p><strong>Term:</strong> {{ payment.term }} ({{ payment.session }})</p>
+        <p><strong>Date:</strong> {{ payment.payment_date.strftime('%Y-%m-%d %I:%M %p') }}</p>
+        <p><strong>Payment Type:</strong> {{ payment.payment_type }}</p>
+    </div>
 
-  <div class="mt-6 flex justify-center">
-    <a href="{{ url_for('download_receipt', payment_id=payment.id) }}"
-       class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
-      Download PDF
-    </a>
-  </div>
+    <div class="bg-gray-50 p-4 rounded-lg shadow-inner">
+        <h3 class="text-xl font-semibold text-gray-800 mb-3 border-b pb-2">Financial Summary ({{ payment.term }})</h3>
+        
+        <div class="space-y-2">
+            <p class="flex justify-between text-gray-600">
+                <span>Expected Fee:</span>
+                <span class="font-bold text-gray-800">
+                    ₦{{ "%.2f" | format(expected_amount / 100) }}
+                </span>
+            </p>
+
+            <p class="flex justify-between text-gray-600">
+                <span>Total Paid (Cumulative):</span>
+                <span class="font-bold text-green-700">
+                    ₦{{ "%.2f" | format(total_paid / 100) }}
+                </span>
+            </p>
+
+            <p class="flex justify-between text-gray-600">
+                <span>Amount Paid (This Transaction):</span>
+                <span class="font-bold text-blue-700">
+                    ₦{{ "%.2f" | format(payment.amount_paid) }}
+                </span>
+            </p>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-gray-300">
+            <p class="flex justify-between text-lg">
+                <span class="font-extrabold text-red-700">OUTSTANDING BALANCE:</span>
+                <span class="font-extrabold text-2xl text-red-700">
+                    ₦{{ "%.2f" | format(outstanding_balance / 100) }}
+                </span>
+            </p>
+        </div>
+    </div>
+    
+    <p class="text-center text-sm text-gray-500 mt-6">
+        Thank you. All amounts are displayed in Naira (₦).
+    </p>
+
+    <div class="mt-6 flex justify-center">
+        <a href="{{ url_for('download_receipt', payment_id=payment.id) }}"
+            class="bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-md hover:bg-indigo-700 transition">
+            Download & Print PDF
+        </a>
+    </div>
 </div>
 {% endblock %}
