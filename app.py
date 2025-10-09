@@ -710,23 +710,16 @@ def payments():
 
 # ---------------------------
 # RECEIPT GENERATOR (Search Page) 
-# ---------------------------
+# ---------------------------# Enhanced app.py receipt_generator function
 @app.route("/receipt-generator", methods=["GET"])
 @login_required
 def receipt_generator():
-    """
-    Handles the Receipt Generator search page. 
-    It searches for students and displays recent payments for the results.
-    """
     school = current_school()
-    # The search query is usually passed as a URL parameter (e.g., /receipt-generator?search_query=abc)
     search_query = request.args.get('search_query', '').strip()
-    
-    # Placeholder for student results
     students_list = []
     
     if search_query:
-        # Fetch students matching the search query (by name or reg_number)
+        # 1. Fetch students
         students_list = Student.query.filter(
             Student.school_id == school.id,
             db.or_(
@@ -735,9 +728,12 @@ def receipt_generator():
             )
         ).order_by(Student.name).all()
         
+        # 2. Attach recent payments to each student object
+        for student in students_list:
+            student.payments = Payment.query.filter_by(student_id=student.id)\
+                                           .order_by(Payment.payment_date.desc())\
+                                           .limit(5).all() # Limit to 5 recent payments
     
-    # You will use 'students_list' in your 'receipt_generator.html' to display
-    # students and their links to payment receipts.
     return render_template('receipt_generator.html', 
                            students_list=students_list, 
                            search_query=search_query)
@@ -873,3 +869,4 @@ if __name__ == "__main__":
         # db.create_all() 
         pass 
     app.run(debug=True)
+
