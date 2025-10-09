@@ -8,7 +8,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, send_file, flash, jsonify
 )
-
+import logging
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -17,6 +17,9 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from dotenv import load_dotenv
 from PIL import Image
+
+# Set up logging for better error tracking
+logging.basicConfig(level=logging.INFO)
 
 # ---------------------------
 # APP CONFIG
@@ -37,7 +40,10 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    # Setting secure cookie flag based on environment
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV") == "production"
+    
+    # FIX: Defined UPLOAD_FOLDER and ALLOWED_EXTENSIONS globally
     UPLOAD_FOLDER = os.path.join("static", "logos")
     ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
     
@@ -45,11 +51,12 @@ class Config:
     PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY")
     PAYSTACK_SUBSCRIPTION_AMOUNT = 1000000 # in kobo, for NGN 10,000
     
-    TRIAL_LIMIT = 2
+    TRIAL_LIMIT = 2 # Student count limit enforced after trial expires
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Ensure the upload directory exists
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
 db = SQLAlchemy(app)
@@ -63,7 +70,8 @@ class School(db.Model):
     name = db.Column(db.String(150), nullable=False, unique=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    subscription_expiry = db.Column(db.Date, nullable=False)
+    # Changed to Date only for simpler comparison
+    subscription_expiry = db.Column(db.Date, nullable=False) 
     logo_filename = db.Column(db.String(250), nullable=True)
     address = db.Column(db.String(250), nullable=True)
     phone_number = db.Column(db.String(50), nullable=True)
@@ -120,6 +128,7 @@ def current_school():
     return None
 
 def login_required(f):
+    """Decorator to ensure the user is logged in."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         school = current_school()
@@ -127,18 +136,33 @@ def login_required(f):
             flash("Please log in first.", "warning")
             return redirect(url_for("index"))
         
-        # NEW: Check trial limit if subscription is expired
-        if school.subscription_expiry < datetime.today().date():
-            # Check the number of students
-            student_count = Student.query.filter_by(school_id=school.id).count()
-            # FIX: Used the correct endpoint names
-            subscription_endpoint = 'pay_with_paystack_subscription'
-            if student_count >= app.config['TRIAL_LIMIT']:
-                if request.endpoint not in [subscription_endpoint, 'paystack_callback', 'logout']:
-                    flash(f"Your trial has ended. Please subscribe to add more than {app.config['TRIAL_LIMIT']} students.", "danger")
-                    return redirect(url_for(subscription_endpoint))
+        # NOTE: Removed complex trial logic here, now handled by @trial_required
         return f(*args, **kwargs)
     return decorated_function
+
+def trial_required(f):
+    """
+    NEW DECORATOR: Checks if the user's subscription (time-based) has expired.
+    If expired, redirects them to the subscription renewal page.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        school = current_school()
+        now = datetime.today().date() # Compare Date fields
+
+        subscription_endpoint = 'pay_with_paystack_subscription'
+        
+        # Check if the subscription_expiry date is in the past
+        if school.subscription_expiry is None or school.subscription_expiry < now:
+            # Exempt payment/auth endpoints from restriction
+            if request.endpoint not in [subscription_endpoint, 'paystack_callback', 'logout', 'index', 'register']:
+                flash("Your subscription has expired. Please renew to continue using all features.", "danger")
+                return redirect(url_for(subscription_endpoint))
+        
+        # If not expired, or if accessing an unprotected endpoint, proceed
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
@@ -159,29 +183,41 @@ def handle_logo_upload(school):
     if not allowed_file(file.filename):
         flash("Invalid file type. Please upload a PNG or JPG.", "danger")
         return False
-    filename = secure_filename(f"{school.id}_{file.filename}")
+    
+    # Construct filename using school ID and name, then secure it
+    ext = file.filename.rsplit('.', 1)[1].lower()
+    # Ensure name is safe for filename
+    safe_name = secure_filename(school.name.lower().replace(' ', '_'))
+    filename = f"{school.id}_{safe_name}.{ext}"
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    
     try:
         file_content = file.read()
+        
+        # Basic validation using PIL
         with Image.open(BytesIO(file_content)) as img:
             img_format = img.format.upper()
             if img_format not in ("JPEG", "PNG"):
                 flash("Invalid image content. File is not a valid JPEG or PNG.", "danger")
                 return False
+                
+        # Save the file
         with open(file_path, "wb") as f:
             f.write(file_content)
+            
         school.logo_filename = filename
         db.session.commit()
         flash("Logo uploaded successfully!", "success")
         return True
     except Exception as e:
+        app.logger.error(f"Error processing image: {e}")
         flash(f"Error processing image: {e}", "danger")
         return False
 
 def create_new_payment(form_data, student):
     try:
         # Amount expected to be in Naira (or primary currency unit)
-        amount = float(form_data.get("amount") or form_data.get("amount_paid")) 
+        amount = float(form_data.get("amount") or form_data.get("amount_paid"))  
         if amount <= 0:
             flash("Amount must be greater than zero.", "danger")
             return None
@@ -233,9 +269,18 @@ def register():
         if School.query.filter((School.email == email) | (School.name == name)).first():
             flash("School already exists!", "danger")
             return redirect(url_for("register"))
+        
+        if len(password) < 8:
+            flash("Password must be at least 8 characters long.", "danger")
+            return redirect(url_for("register"))
+            
         hashed_pw = generate_password_hash(password)
-        # Give a trial period on registration (e.g., 30 days)
-        initial_expiry = datetime.today().date() + timedelta(days=30) 
+        
+        # ----------------------------------------------------
+        # CRITICAL FIX: Give a trial period of exactly 1 day
+        # ----------------------------------------------------
+        initial_expiry = datetime.today().date() + timedelta(days=1) 
+        
         school = School(
             name=name,
             email=email,
@@ -244,7 +289,9 @@ def register():
         )
         db.session.add(school)
         db.session.commit()
-        flash("School registered successfully! Please log in.", "success")
+        flash("School registered successfully! Enjoy your 1-day trial.", "success")
+        return redirect(url_for("index")) # Redirect to login after successful registration
+
     return render_template("register.html")
 
 @app.route("/logout")
@@ -258,6 +305,7 @@ def logout():
 # ---------------------------
 @app.route("/dashboard")
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def dashboard():
     school = current_school()
     
@@ -269,15 +317,15 @@ def dashboard():
                             .filter(Student.school_id == school.id)
                             .scalar()) or 0
     total_payments_kobo = int(total_payments_naira * 100)
-                            
+    
     recent_payments = (Payment.query.join(Student)
                               .filter(Student.school_id == school.id)
                               .order_by(Payment.payment_date.desc())
                               .limit(5)
                               .all())
-                              
+    
     # ----------------------------------------------------
-    # FIX: Calculate Outstanding Balance using Manual Input (in kobo/cents)
+    # Calculate Outstanding Balance using Manual Input (in kobo/cents)
     # ----------------------------------------------------
     
     # 1. Get the manually entered expected fees (stored in kobo/cents)
@@ -287,9 +335,8 @@ def dashboard():
     outstanding_balance_kobo = expected_fees_kobo - total_payments_kobo
     
     # Ensure the balance is not negative (if the school has been overpaid)
-    if outstanding_balance_kobo < 0:
-        outstanding_balance_kobo = 0
-        
+    outstanding_balance_kobo = max(0, outstanding_balance_kobo)
+    
     # ----------------------------------------------------
 
     return render_template(
@@ -302,10 +349,50 @@ def dashboard():
         school=school,
     )
 # ---------------------------
+# SETTINGS/PROFILE PAGE
+# ---------------------------
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+@trial_required # NEW: Enforce time-based trial restriction
+def settings():
+    school = current_school()
+
+    if request.method == 'POST':
+        # 1. Process standard text fields
+        school.name = request.form.get('school_name')
+        school.email = request.form.get('email')
+        school.address = request.form.get('address')
+        school.phone_number = request.form.get('phone_number')
+        
+        # 2. Process Expected Total Fees (convert Naira/Primary back to Kobo/Cents)
+        try:
+            expected_naira = float(request.form.get('expected_fees_this_term', 0))
+            # Rounding to prevent floating point errors before converting to int for kobo
+            school.expected_fees_this_term = int(round(expected_naira * 100))
+        except ValueError:
+            flash("Invalid fee amount entered.", "danger")
+            return redirect(url_for('settings'))
+
+        # 3. Handle file upload (Logo)
+        if 'logo' in request.files:
+            handle_logo_upload(school) # Use the enhanced helper function
+
+        # 4. Commit standard changes to the database
+        db.session.commit()
+        flash("School settings updated successfully!", "success")
+        
+        # Redirect after POST to prevent resubmission on refresh
+        return redirect(url_for('settings'))
+
+    # GET request: Render the form
+    return render_template("settings.html", school=school)
+
+# ---------------------------
 # LOGO UPLOAD
 # ---------------------------
 @app.route("/upload_logo", methods=["POST"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def upload_logo():
     school = current_school()
     handle_logo_upload(school)
@@ -316,15 +403,17 @@ def upload_logo():
 # ---------------------------
 @app.route("/students", methods=["GET", "POST"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def students():
     school = current_school()
     
     if request.method == "POST":
         student_count = Student.query.filter_by(school_id=school.id).count()
-        # FIX: Used the correct endpoint names
         subscription_endpoint = 'pay_with_paystack_subscription'
+        
+        # Student count restriction only prevents POST (adding new students)
         if school.subscription_expiry < datetime.today().date() and student_count >= app.config['TRIAL_LIMIT']:
-            flash(f"Your trial has ended. Please subscribe to add more students.", "danger")
+            flash(f"Your subscription has expired. Please renew to add more than {app.config['TRIAL_LIMIT']} students.", "danger")
             return redirect(url_for(subscription_endpoint))
             
         name = request.form.get("name", "").strip()
@@ -351,6 +440,7 @@ def students():
         
     students_list = Student.query.filter_by(school_id=school.id).all()
     student_count = len(students_list)
+    # Logic for display banner: trial active if time hasn't expired OR student count is below limit.
     trial_active = school.subscription_expiry >= datetime.today().date() or student_count < app.config['TRIAL_LIMIT']
     
     return render_template("students.html", students=students_list, student_count=student_count, trial_limit=app.config['TRIAL_LIMIT'], trial_active=trial_active)
@@ -360,6 +450,7 @@ def students():
 # ---------------------------
 @app.route("/search-students", methods=["GET"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def search_students():
     school = current_school()
     query = request.args.get("q", "").strip()
@@ -377,6 +468,7 @@ def search_students():
 
 @app.route("/student-financials", methods=["GET"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def student_financials():
     student_id = request.args.get("student_id", type=int)
     term = request.args.get("term", "").strip()
@@ -403,11 +495,8 @@ def student_financials():
     total_paid_kobo = int(total_paid_naira * 100)
     
     # 3. Calculate outstanding (in kobo/cents)
-    # NOTE: This calculation is term-specific, which is a flaw if FeeStructure is annual/term-agnostic.
-    # For now, we follow the old logic structure and use FeeStructure's annual amount for term calculation.
     outstanding_kobo = expected_amount_kobo - total_paid_kobo
-    if outstanding_kobo < 0:
-        outstanding_kobo = 0
+    outstanding_kobo = max(0, outstanding_kobo)
         
     # Convert back to Naira for client-side display in API response
     return jsonify({
@@ -420,19 +509,23 @@ def student_financials():
 # ---------------------------
 # PAYSTACK INTEGRATION ROUTES
 # ---------------------------
-# FIX: Added 'GET' method to allow the sidebar link to load the page.
 @app.route("/pay-with-paystack-subscription", methods=["GET", "POST"])
 @login_required
+# NOTE: This route is intentionally NOT wrapped in @trial_required
 def pay_with_paystack_subscription():
     school = current_school()
     
     # If the request is a GET, render the page.
     if request.method == "GET":
+        # Check if they are already subscribed
+        is_subscribed = school.subscription_expiry >= datetime.today().date()
+        
         return render_template(
             "subscription.html",
             school=school,
             subscription_amount=app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'] / 100, # Convert kobo to NGN
-            today=datetime.today().date()
+            today=datetime.today().date(),
+            is_subscribed=is_subscribed
         )
 
     # If the request is a POST, initialize payment.
@@ -460,10 +553,12 @@ def pay_with_paystack_subscription():
         else:
             return jsonify(error=res_data["message"]), 400
     except requests.exceptions.RequestException as e:
+        app.logger.error(f"Paystack API error during initialization: {e}")
         return jsonify(error=f"Paystack API error: {e}"), 500
 
 @app.route("/paystack/callback", methods=["GET"])
 @login_required
+# NOTE: This route is intentionally NOT wrapped in @trial_required
 def paystack_callback():
     reference = request.args.get("reference")
     school = current_school()
@@ -484,23 +579,26 @@ def paystack_callback():
             # Add 1 year to the subscription expiry date
             school.subscription_expiry = datetime.today().date() + timedelta(days=365)
             db.session.commit()
-            flash("Subscription renewed successfully!", "success")
+            flash("Subscription renewed successfully! You now have full access.", "success")
         else:
             flash("Subscription payment failed or was not verified.", "danger")
 
     except requests.exceptions.RequestException as e:
+        app.logger.error(f"Paystack API error during verification: {e}")
         flash(f"Payment verification failed: {e}", "danger")
     
-    return redirect(url_for("pay_with_paystack_subscription")) 
+    return redirect(url_for("dashboard")) # Redirect to dashboard after successful payment
 
 @app.route("/add-payment", methods=["GET", "POST"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def add_payment():
     school = current_school()
     
     if request.method == "POST":
         student_id = request.form.get("student_id")
         
+        # ... (rest of POST logic remains the same)
         if not student_id:
             if request.accept_mimetypes.accept_json:
                 return jsonify(error="No student selected."), 400
@@ -585,6 +683,7 @@ def add_payment():
 # ---------------------------
 @app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def fee_structure():
     school = current_school()
     
@@ -645,6 +744,7 @@ def fee_structure():
 # ---------------------------
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def delete_fee_structure(fee_id):
     school = current_school()
     fee = db.session.get(FeeStructure, fee_id)
@@ -665,6 +765,7 @@ def delete_fee_structure(fee_id):
 # ---------------------------
 @app.route("/payments", methods=["GET"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def payments():
     school = current_school()
     search = request.args.get("search", "").strip()
@@ -710,9 +811,10 @@ def payments():
 
 # ---------------------------
 # RECEIPT GENERATOR (Search Page) 
-# ---------------------------# Enhanced app.py receipt_generator function
+# ---------------------------
 @app.route("/receipt-generator", methods=["GET"])
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def receipt_generator():
     school = current_school()
     search_query = request.args.get('search_query', '').strip()
@@ -744,6 +846,7 @@ def receipt_generator():
 # ---------------------------
 @app.route("/payment_receipt/<int:payment_id>")
 @login_required
+@trial_required # NEW: Enforce time-based trial restriction
 def payment_receipt(payment_id):
     school = current_school()
     
@@ -761,11 +864,9 @@ def payment_receipt(payment_id):
     current_session = payment.session
 
     # 2. Get the expected fee for the student's class and period (in kobo/cents)
-    #    NOTE: You must ensure FeeStructure accounts for Term/Session if fees change.
     expected_fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student_class
-        # Consider adding term=current_term and session=current_session to the filter
     ).first()
     
     # Default expected amount to 0 if no fee structure is defined for the class
@@ -796,159 +897,6 @@ def payment_receipt(payment_id):
         payment=payment,
         student=student,
         expected_amount=expected_amount_kobo,
-        total_paid=total_paid_kobo,
+        total_paid=total_paid_kobo, # Pass total paid in kobo for UI display 
         outstanding_balance=outstanding_balance_kobo
     )
-# ---------------------------
-# RECEIPT (HTML preview) - RENAMED TO FIX CONFLICT
-# ---------------------------
-@app.route("/receipt/<int:payment_id>", methods=["GET"])
-@login_required
-def view_receipt_html(payment_id): # <-- RENAMED FUNCTION
-    payment = db.session.get(Payment, payment_id)
-    school = current_school()
-    if not payment or payment.student.school_id != school.id:
-        flash("Access denied or payment not found", "danger")
-        return redirect(url_for("dashboard"))
-    return render_template("receipt.html", payment=payment, school=school)
-
-@app.route("/receipt/<int:payment_id>/download", methods=["GET"])
-@login_required
-def download_receipt(payment_id):
-    payment = db.session.get(Payment, payment_id)
-    school = current_school()
-    if not payment or payment.student.school_id != school.id:
-        flash("Access denied or payment not found", "danger")
-        return redirect(url_for("dashboard"))
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    logo_path = get_logo_path(school)
-    if logo_path and os.path.exists(logo_path):
-        try:
-            # Ensure proper scaling for PDF embed
-            c.drawImage(logo_path, 50, height - 120, width=80, height=80, preserveAspectRatio=True, mask="auto")
-        except Exception:
-            # Silently fail if logo cannot be drawn to prevent PDF generation crash
-            pass
-    c.setFont("Helvetica-Bold", 18)
-    c.drawCentredString(width / 2, height - 80, (school.name or "SCHOOL").upper())
-    c.setFont("Helvetica", 14)
-    c.drawCentredString(width / 2, height - 160, "PAYMENT RECEIPT")
-    c.setFont("Helvetica", 12)
-    c.drawString(50, 650, f"Student: {payment.student.name}")
-    c.drawString(50, 630, f"Reg No: {payment.student.reg_number or 'N/A'}")
-    c.drawString(50, 610, f"Class: {payment.student.student_class or 'N/A'}")
-    c.drawString(50, 590, f"Payment Type: {payment.payment_type or 'N/A'}")
-    c.drawString(50, 570, f"Term: {payment.term or 'N/A'} | Session: {payment.session or 'N/A'}")
-    c.drawString(50, 550, f"Amount Paid: ₦{payment.amount_paid:,.2f}")
-    c.drawString(50, 530, f"Date: {payment.payment_date.strftime('%Y-%m-%d %I:%M %p')}")
-
-    # Add a footer/signature line
-    c.line(50, 200, width - 50, 200)
-    c.drawCentredString(width / 2, 180, "This is an electronically generated receipt.")
-    c.drawCentredString(width / 2, 160, f"Ref ID: {payment.id}")
-    
-    c.showPage()
-    c.save()
-    buffer.seek(0)
-    
-    filename = f"receipt_{payment.id}_{payment.student.reg_number}.pdf"
-    return send_file(
-        buffer,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-import os
-from flask import Flask, request, redirect, url_for, render_template, flash
-from werkzeug.utils import secure_filename
-# ... other necessary imports (db, School, current_school, etc.)
-
-# =========================================================
-# FILE UPLOAD CONFIGURATION AND HELPER FUNCTIONS (MISSING)
-# =========================================================
-
-# 1. Define the folder where logos will be saved, relative to app.root_path
-UPLOAD_FOLDER = 'static/logos' 
-
-# 2. Define allowed extensions for security
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-
-# 3. Helper function to check filename extension
-def allowed_file(filename):
-    """Checks if the file extension is allowed."""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# =========================================================
-# ... Rest of your app.py code ...
-# =========================================================
-
-
-# ---------------------------
-# SETTINGS/PROFILE PAGE
-# ---------------------------
-@app.route("/settings", methods=["GET", "POST"]) 
-@login_required
-def settings():
-    school = current_school()
-
-    if request.method == 'POST':
-        # 1. Process standard text fields
-        school.name = request.form.get('school_name')
-        school.email = request.form.get('email')
-        school.address = request.form.get('address')
-        school.phone_number = request.form.get('phone_number')
-        
-        # 2. Process Expected Total Fees (convert Naira/Primary back to Kobo/Cents)
-        try:
-            expected_naira = float(request.form.get('expected_fees_this_term', 0))
-            # Rounding to prevent floating point errors before converting to int for kobo
-            school.expected_fees_this_term = int(round(expected_naira * 100))
-        except ValueError:
-            flash("Invalid fee amount entered.", "danger")
-            return redirect(url_for('settings'))
-
-        # 3. Handle file upload (Logo)
-        if 'logo' in request.files:
-            file = request.files['logo']
-            if file.filename != '' and allowed_file(file.filename):
-                # We use the school ID to make the filename unique and identifiable
-                ext = file.filename.rsplit('.', 1)[1].lower()
-                filename = f"{school.id}_{secure_filename(school.name.lower().replace(' ', '_'))}.{ext}"
-                file_path = os.path.join(app.root_path, UPLOAD_FOLDER, filename)
-                
-                # Save the new file
-                file.save(file_path)
-                
-                # Update the database reference
-                school.logo_filename = filename
-            elif file.filename != '':
-                 flash("Invalid file type for logo. Only PNG, JPG, JPEG, GIF allowed.", "warning")
-
-        # 4. Commit changes to the database
-        db.session.commit()
-        flash("School settings updated successfully!", "success")
-        
-        # Redirect after POST to prevent resubmission on refresh
-        return redirect(url_for('settings'))
-
-    # GET request: Render the form
-    return render_template("settings.html", school=school)
-
-
-if __name__ == "__main__":
-    with app.app_context():
-        # Ensure database and migrations are set up if running locally
-        # db.create_all() 
-        pass 
-    app.run(debug=True)
-
-
-
-
-
-
-
-
