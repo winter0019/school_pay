@@ -860,11 +860,36 @@ def download_receipt(payment_id):
         as_attachment=True,
         download_name=filename
     )
+import os
+from flask import Flask, request, redirect, url_for, render_template, flash
+from werkzeug.utils import secure_filename
+# ... other necessary imports (db, School, current_school, etc.)
+
+# =========================================================
+# FILE UPLOAD CONFIGURATION AND HELPER FUNCTIONS (MISSING)
+# =========================================================
+
+# 1. Define the folder where logos will be saved, relative to app.root_path
+UPLOAD_FOLDER = 'static/logos' 
+
+# 2. Define allowed extensions for security
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+# 3. Helper function to check filename extension
+def allowed_file(filename):
+    """Checks if the file extension is allowed."""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# =========================================================
+# ... Rest of your app.py code ...
+# =========================================================
+
 
 # ---------------------------
 # SETTINGS/PROFILE PAGE
 # ---------------------------
-@app.route("/settings", methods=["GET", "POST"]) # <--- CRITICAL CHANGE: Added "POST"
+@app.route("/settings", methods=["GET", "POST"]) 
 @login_required
 def settings():
     school = current_school()
@@ -912,12 +937,14 @@ def settings():
     # GET request: Render the form
     return render_template("settings.html", school=school)
 
+
 if __name__ == "__main__":
     with app.app_context():
         # Ensure database and migrations are set up if running locally
         # db.create_all() 
         pass 
     app.run(debug=True)
+
 
 
 
