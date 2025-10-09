@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -46,7 +47,11 @@
                 <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'students' %}bg-indigo-700{% endif %}">Students</a>
                 <a href="{{ url_for('payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'payments' %}bg-indigo-700{% endif %}">Payments</a>
                 <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'add_payment' %}bg-indigo-700{% endif %}">Add Payment</a>
-                <a href="{{ url_for('receipt_generator') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'receipt_generator' %}bg-indigo-700{% endif %}">Receipt Generator</a>
+
+            <!-- FIX APPLIED HERE: Changed 'receipt_generator' to 'view_receipt_html' as suggested by the Werkzeug error. -->
+
+                <a href="{{ url_for('view_receipt_html') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'view_receipt_html' %}bg-indigo-700{% endif %}">Receipt Generator</a>
+
                 <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'pay_with_paystack_subscription' %}bg-indigo-700{% endif %}">Subscription</a>
                 
             </nav>
