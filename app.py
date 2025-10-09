@@ -709,7 +709,7 @@ def payments():
     )
 
 # ---------------------------
-# RECEIPT GENERATOR (Search Page) <--- THE CRITICAL MISSING ROUTE
+# RECEIPT GENERATOR (Search Page) 
 # ---------------------------
 @app.route("/receipt-generator", methods=["GET"])
 @login_required
@@ -854,6 +854,18 @@ def download_receipt(payment_id):
         as_attachment=True,
         download_name=filename
     )
+
+# ---------------------------
+# SETTINGS/PROFILE PAGE
+# ---------------------------
+@app.route("/settings", methods=["GET"])
+@login_required
+def settings():
+    # Placeholder route to satisfy the 'settings' url_for call in base.html
+    school = current_school()
+    # You will need to create a settings.html template for this to work correctly
+    return render_template("settings.html", school=school)
+
 
 if __name__ == "__main__":
     with app.app_context():
