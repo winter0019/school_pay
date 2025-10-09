@@ -864,14 +864,53 @@ def download_receipt(payment_id):
 # ---------------------------
 # SETTINGS/PROFILE PAGE
 # ---------------------------
-@app.route("/settings", methods=["GET"])
+@app.route("/settings", methods=["GET", "POST"]) # <--- CRITICAL CHANGE: Added "POST"
 @login_required
 def settings():
-    # Placeholder route to satisfy the 'settings' url_for call in base.html
     school = current_school()
-    # You will need to create a settings.html template for this to work correctly
-    return render_template("settings.html", school=school)
 
+    if request.method == 'POST':
+        # 1. Process standard text fields
+        school.name = request.form.get('school_name')
+        school.email = request.form.get('email')
+        school.address = request.form.get('address')
+        school.phone_number = request.form.get('phone_number')
+        
+        # 2. Process Expected Total Fees (convert Naira/Primary back to Kobo/Cents)
+        try:
+            expected_naira = float(request.form.get('expected_fees_this_term', 0))
+            # Rounding to prevent floating point errors before converting to int for kobo
+            school.expected_fees_this_term = int(round(expected_naira * 100))
+        except ValueError:
+            flash("Invalid fee amount entered.", "danger")
+            return redirect(url_for('settings'))
+
+        # 3. Handle file upload (Logo)
+        if 'logo' in request.files:
+            file = request.files['logo']
+            if file.filename != '' and allowed_file(file.filename):
+                # We use the school ID to make the filename unique and identifiable
+                ext = file.filename.rsplit('.', 1)[1].lower()
+                filename = f"{school.id}_{secure_filename(school.name.lower().replace(' ', '_'))}.{ext}"
+                file_path = os.path.join(app.root_path, UPLOAD_FOLDER, filename)
+                
+                # Save the new file
+                file.save(file_path)
+                
+                # Update the database reference
+                school.logo_filename = filename
+            elif file.filename != '':
+                 flash("Invalid file type for logo. Only PNG, JPG, JPEG, GIF allowed.", "warning")
+
+        # 4. Commit changes to the database
+        db.session.commit()
+        flash("School settings updated successfully!", "success")
+        
+        # Redirect after POST to prevent resubmission on refresh
+        return redirect(url_for('settings'))
+
+    # GET request: Render the form
+    return render_template("settings.html", school=school)
 
 if __name__ == "__main__":
     with app.app_context():
@@ -879,6 +918,7 @@ if __name__ == "__main__":
         # db.create_all() 
         pass 
     app.run(debug=True)
+
 
 
 
