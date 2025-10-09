@@ -15,6 +15,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 from dotenv import load_dotenv
 from PIL import Image
 
@@ -154,8 +155,13 @@ def trial_required(f):
         
         # Check if the subscription_expiry date is in the past
         if school.subscription_expiry is None or school.subscription_expiry < now:
-            # Exempt payment/auth endpoints from restriction
-            if request.endpoint not in [subscription_endpoint, 'paystack_callback', 'logout', 'index', 'register']:
+            # Exempt payment/auth/receipt endpoints from restriction
+            unprotected_endpoints = [
+                subscription_endpoint, 'paystack_callback', 'logout', 
+                'index', 'register', 'payment_receipt', 'generate_receipt'
+            ]
+            
+            if request.endpoint not in unprotected_endpoints:
                 flash("Your subscription has expired. Please renew to continue using all features.", "danger")
                 return redirect(url_for(subscription_endpoint))
         
@@ -178,8 +184,8 @@ def handle_logo_upload(school):
         return False
     file = request.files["logo"]
     if file.filename == '':
-        flash("No selected file.", "danger")
-        return False
+        # This is where a user might intentionally leave the file input blank
+        return True 
     if not allowed_file(file.filename):
         flash("Invalid file type. Please upload a PNG or JPG.", "danger")
         return False
@@ -246,6 +252,33 @@ def create_new_payment(form_data, student):
     return payment
 
 # ---------------------------
+# TEMPLATE FILTERS (for display)
+# ---------------------------
+@app.template_filter('currency_format')
+def currency_format_filter(value_kobo):
+    """Formats kobo/cents integer amount into Naira/NGN currency string."""
+    if value_kobo is None:
+        return "N/A"
+    try:
+        # Convert integer kobo/cents back to float Naira/Primary Currency
+        naira_value = int(value_kobo) / 100.0
+        # Format with commas and two decimal places
+        return f"₦{naira_value:,.2f}"
+    except (ValueError, TypeError):
+        return "N/A"
+
+@app.template_filter('naira_format')
+def naira_format_filter(value_naira):
+    """Formats float Naira/Primary currency unit into Naira/NGN currency string."""
+    if value_naira is None:
+        return "N/A"
+    try:
+        # Format with commas and two decimal places
+        return f"₦{float(value_naira):,.2f}"
+    except (ValueError, TypeError):
+        return "N/A"
+
+# ---------------------------
 # AUTH
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
@@ -276,9 +309,7 @@ def register():
             
         hashed_pw = generate_password_hash(password)
         
-        # ----------------------------------------------------
         # CRITICAL FIX: Give a trial period of exactly 1 day
-        # ----------------------------------------------------
         initial_expiry = datetime.today().date() + timedelta(days=1) 
         
         school = School(
@@ -311,7 +342,7 @@ def dashboard():
     
     total_students = Student.query.filter_by(school_id=school.id).count()
     
-    # Total payments made (stored in Naira/Primary Currency, then converted to kobo for display consistency)
+    # Total payments made (stored in Naira/Primary Currency)
     total_payments_naira = (db.session.query(db.func.sum(Payment.amount_paid))
                             .join(Student)
                             .filter(Student.school_id == school.id)
@@ -319,26 +350,18 @@ def dashboard():
     total_payments_kobo = int(total_payments_naira * 100)
     
     recent_payments = (Payment.query.join(Student)
-                              .filter(Student.school_id == school.id)
-                              .order_by(Payment.payment_date.desc())
-                              .limit(5)
-                              .all())
+                            .filter(Student.school_id == school.id)
+                            .order_by(Payment.payment_date.desc())
+                            .limit(5)
+                            .all())
     
-    # ----------------------------------------------------
     # Calculate Outstanding Balance using Manual Input (in kobo/cents)
-    # ----------------------------------------------------
-    
-    # 1. Get the manually entered expected fees (stored in kobo/cents)
     expected_fees_kobo = school.expected_fees_this_term or 0
-    
-    # 2. Calculate the outstanding balance (still in kobo/cents)
     outstanding_balance_kobo = expected_fees_kobo - total_payments_kobo
     
     # Ensure the balance is not negative (if the school has been overpaid)
     outstanding_balance_kobo = max(0, outstanding_balance_kobo)
     
-    # ----------------------------------------------------
-
     return render_template(
         "dashboard.html",
         total_students=total_students,
@@ -374,7 +397,7 @@ def settings():
             return redirect(url_for('settings'))
 
         # 3. Handle file upload (Logo)
-        if 'logo' in request.files:
+        if 'logo' in request.files and request.files['logo'].filename != '':
             handle_logo_upload(school) # Use the enhanced helper function
 
         # 4. Commit standard changes to the database
@@ -388,7 +411,7 @@ def settings():
     return render_template("settings.html", school=school)
 
 # ---------------------------
-# LOGO UPLOAD
+# LOGO UPLOAD (DEPRECATED - now handled in settings)
 # ---------------------------
 @app.route("/upload_logo", methods=["POST"])
 @login_required
@@ -787,116 +810,146 @@ def payments():
     if session_year:
         query = query.filter(Payment.session == session_year)
     
-    payments_paginated = query.order_by(Payment.payment_date.desc()).paginate(page=page, per_page=20)
+    # --- COMPLETED PAGINATION LOGIC ---
+    payments_paginated = query.order_by(Payment.payment_date.desc()).paginate(
+        page=page, per_page=10, error_out=False
+    )
     
-    students_list = []
-    if not payments_paginated.items and search:
-        students_list = Student.query.filter(
-            Student.school_id == school.id,
-            db.or_(
-                Student.name.ilike(f"%{search}%"),
-                Student.reg_number.ilike(f"%{search}%")
-            )
-        ).all()
+    # Collect unique terms and sessions for filter dropdowns
+    available_terms = db.session.query(Payment.term).filter(
+        Payment.student_id.in_(db.session.query(Student.id).filter_by(school_id=school.id))
+    ).distinct().order_by(Payment.term.asc()).all()
+    
+    available_sessions = db.session.query(Payment.session).filter(
+        Payment.student_id.in_(db.session.query(Student.id).filter_by(school_id=school.id))
+    ).distinct().order_by(Payment.session.desc()).all()
 
     return render_template(
         "payments.html",
-        payments=payments_paginated.items,
-        pagination=payments_paginated,
-        students=students_list,
+        payments=payments_paginated,
         search=search,
-        term=term,
-        session_year=session_year,
+        selected_term=term,
+        selected_session=session_year,
+        available_terms=[t[0] for t in available_terms if t[0]],
+        available_sessions=[s[0] for s in available_sessions if s[0]]
     )
-
-# ---------------------------
-# RECEIPT GENERATOR (Search Page) 
-# ---------------------------
-@app.route("/receipt-generator", methods=["GET"])
-@login_required
-@trial_required # NEW: Enforce time-based trial restriction
-def receipt_generator():
-    school = current_school()
-    search_query = request.args.get('search_query', '').strip()
-    students_list = []
     
-    if search_query:
-        # 1. Fetch students
-        students_list = Student.query.filter(
-            Student.school_id == school.id,
-            db.or_(
-                Student.name.ilike(f"%{search_query}%"),
-                Student.reg_number.ilike(f"%{search_query}%")
-            )
-        ).order_by(Student.name).all()
-        
-        # 2. Attach recent payments to each student object
-        for student in students_list:
-            student.payments = Payment.query.filter_by(student_id=student.id)\
-                                           .order_by(Payment.payment_date.desc())\
-                                           .limit(5).all() # Limit to 5 recent payments
-    
-    return render_template('receipt_generator.html', 
-                           students_list=students_list, 
-                           search_query=search_query)
-
-
 # ---------------------------
-# PAYMENT RECEIPT GENERATION (Detailed View)
+# PAYMENT RECEIPT & PDF GENERATION
 # ---------------------------
-@app.route("/payment_receipt/<int:payment_id>")
+@app.route("/payment-receipt/<int:payment_id>")
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def payment_receipt(payment_id):
     school = current_school()
-    
-    # 1. Get the current payment
     payment = db.session.get(Payment, payment_id)
+
     if not payment or payment.student.school_id != school.id:
-        flash("Payment receipt not found or access denied.", "danger")
-        return redirect(url_for('dashboard'))
+        flash("Payment receipt not found.", "danger")
+        return redirect(url_for("payments"))
 
-    student = payment.student
-    student_class = student.student_class
+    return render_template("payment_receipt.html", payment=payment, school=school)
+
+@app.route("/generate-receipt/<int:payment_id>")
+@login_required
+@trial_required
+def generate_receipt(payment_id):
+    school = current_school()
+    payment = db.session.get(Payment, payment_id)
+
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment receipt not found.", "danger")
+        return redirect(url_for("payments"))
+
+    # Create a BytesIO buffer to hold the PDF data
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 50
+
+    # --- Draw Receipt ---
     
-    # --- CRITICAL FILTER VALUES ---
-    current_term = payment.term
-    current_session = payment.session
-
-    # 2. Get the expected fee for the student's class and period (in kobo/cents)
-    expected_fee_structure = FeeStructure.query.filter_by(
-        school_id=school.id,
-        class_name=student_class
-    ).first()
+    # Title Box/Border
+    p.setFillColor(colors.lightgrey)
+    p.rect(margin, height - 120, width - 2 * margin, 80, fill=1)
     
-    # Default expected amount to 0 if no fee structure is defined for the class
-    expected_amount_kobo = expected_fee_structure.expected_amount if expected_fee_structure else 0
+    # Header
+    p.setFillColor(colors.black)
+    p.setFont("Helvetica-Bold", 18)
+    p.drawCentredString(width / 2, height - 70, f"OFFICIAL PAYMENT RECEIPT")
+    p.setFont("Helvetica-Bold", 14)
+    p.drawCentredString(width / 2, height - 90, school.name.upper())
 
-    # 3. Calculate total payments made for THIS TERM/SESSION ONLY (in Naira)
-    total_paid_naira = db.session.query(db.func.sum(Payment.amount_paid)). \
-        filter(
-            Payment.student_id == student.id,
-            # *** ADDED FILTERS: ONLY SUM PAYMENTS FOR THE CURRENT TERM/SESSION ***
-            Payment.term == current_term,
-            Payment.session == current_session
-        ). \
-        scalar() or 0
-        
-    # Convert total paid amount to kobo for calculation consistency
-    total_paid_kobo = int(total_paid_naira * 100)
-        
-    # 4. Calculate outstanding balance
-    outstanding_balance_kobo = expected_amount_kobo - total_paid_kobo
+    # School Details (Right Side)
+    p.setFont("Helvetica", 9)
+    p.drawString(width - 150, height - 50, f"Email: {school.email}")
+    p.drawString(width - 150, height - 62, f"Phone: {school.phone_number or 'N/A'}")
+    p.drawString(width - 150, height - 74, f"Address: {school.address or 'N/A'}")
+
+    # Receipt Number and Date
+    p.setFont("Helvetica", 10)
+    p.drawString(margin, height - 150, f"Receipt No: {payment.id:06}")
+    p.drawString(margin, height - 165, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
+
+    # Student Details
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(margin, height - 200, "PAYMENT FOR:")
+    p.setFont("Helvetica", 12)
+    y_pos = height - 220
+    p.drawString(margin, y_pos, f"Student Name: {payment.student.name}")
+    p.drawString(width / 2, y_pos, f"Reg. No: {payment.student.reg_number}")
+    p.drawString(margin, y_pos - 20, f"Class: {payment.student.student_class}")
+    p.drawString(width / 2, y_pos - 20, f"For Term: {payment.term} ({payment.session})")
+
+    # Payment Table Header
+    table_y = height - 300
+    p.setFont("Helvetica-Bold", 12)
+    p.setFillColor(colors.darkgreen)
+    p.rect(margin, table_y - 20, width - 2 * margin, 20, fill=1)
+    p.setFillColor(colors.white)
+    p.drawString(margin + 10, table_y - 15, "DESCRIPTION")
+    p.drawString(width - 150, table_y - 15, "AMOUNT (NGN)")
     
-    # Ensure outstanding balance is not negative (in case of overpayment)
-    outstanding_balance_kobo = max(0, outstanding_balance_kobo)
+    # Payment Row
+    p.setFillColor(colors.black)
+    p.setFont("Helvetica", 12)
+    p.drawString(margin + 10, table_y - 45, f"School Fees Payment ({payment.payment_type})")
+    
+    # Amount (stored as Naira/float)
+    amount_str = f"{payment.amount_paid:,.2f}"
+    p.drawString(width - 150, table_y - 45, amount_str)
+    
+    # Total
+    p.setStrokeColor(colors.darkgreen)
+    p.setLineWidth(2)
+    p.line(width - 200, table_y - 65, width - margin, table_y - 65)
+    
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(margin + 10, table_y - 85, "TOTAL PAID:")
+    p.drawString(width - 150, table_y - 85, amount_str)
 
-    # 5. Pass all calculated values to the template
-    return render_template(
-        "receipt.html",
-        payment=payment,
-        student=student,
-        expected_amount=expected_amount_kobo,
-        total_paid=total_paid_kobo, # Pass total paid in kobo for UI display 
-        outstanding_balance=outstanding_balance_kobo
+    # Footer
+    p.setFont("Helvetica-Oblique", 10)
+    p.setFillColor(colors.grey)
+    p.drawString(margin, 50, "This is a computer-generated receipt. Thank you for your payment.")
+
+    p.showPage()
+    p.save()
+
+    # Move buffer position to the beginning
+    buffer.seek(0)
+    
+    filename = f"receipt_{payment.student.reg_number}_{payment_id}.pdf"
+    
+    # Send the PDF file to the client
+    return send_file(
+        buffer,
+        download_name=filename,
+        mimetype="application/pdf",
+        as_attachment=True
     )
+
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
