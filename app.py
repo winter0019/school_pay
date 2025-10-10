@@ -18,6 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from dotenv import load_dotenv
 from PIL import Image
+from sqlalchemy import func
 
 # Set up logging for better error tracking
 logging.basicConfig(level=logging.INFO)
@@ -749,7 +750,7 @@ def add_payment():
 # ---------------------------
 @app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def fee_structure():
     school = current_school()
     
@@ -798,43 +799,85 @@ def fee_structure():
     fee_structures = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.class_name).all()
     
     # Get a list of unique class names currently in use by students
-    active_classes = db.session.query(Student.student_class).filter_by(school_id=school.id).distinct().all()
-    active_classes = [c[0] for c in active_classes if c[0] is not None]
-    
-    return render_template("fee_structure.html", 
-                           fee_structures=fee_structures,
-                           active_classes=active_classes)
+    active_classes = db.session.query(Student.student_class)\
+        .filter_by(school_id=school.id)\
+        .distinct()\
+        .order_by(Student.student_class)\
+        .all()
+        
+    # Convert list of tuples/objects to a simple list of strings
+    active_class_names = [cls[0] for cls in active_classes]
+
+    return render_template(
+        "fee_structure.html", 
+        fee_structures=fee_structures,
+        active_class_names=active_class_names
+    )
 
 # ---------------------------
-# FEE STRUCTURE DELETION
+# FEE STRUCTURE DELETE
 # ---------------------------
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def delete_fee_structure(fee_id):
     school = current_school()
     fee = db.session.get(FeeStructure, fee_id)
     
-    if fee and fee.school_id == school.id:
-        class_name = fee.class_name
-        db.session.delete(fee)
-        db.session.commit()
-        flash(f"Fee structure for {class_name} deleted successfully.", "info")
-    else:
-        flash("Fee structure not found or access denied.", "danger")
+    # Critical security check: Ensure the fee structure belongs to the current school
+    if not fee or fee.school_id != school.id:
+        flash("Fee structure not found or you don't have permission to delete it.", "danger")
+        return redirect(url_for("fee_structure"))
         
-    # CRITICAL FIX: Return statement to complete the route
+    db.session.delete(fee)
+    db.session.commit()
+    flash(f"Fee structure for '{fee.class_name}' deleted successfully.", "success")
+    
     return redirect(url_for("fee_structure"))
 
-# Note: The code for 'payment_receipt', 'generate_receipt', and 'receipt_generator_index' 
-# mentioned in the unprotected_endpoints list is missing but presumed to be defined elsewhere.
+# ---------------------------
+# RECEIPT ROUTES (Placeholders for now)
+# ---------------------------
+@app.route("/receipts/<int:payment_id>")
+@login_required
+@trial_required
+def payment_receipt(payment_id):
+    school = current_school()
+    payment = db.session.get(Payment, payment_id)
+    
+    if not payment or payment.student.school_id != school.id:
+        flash("Receipt not found or access denied.", "danger")
+        return redirect(url_for("list_payments"))
+        
+    # Placeholder: Assuming a simple HTML template for viewing the receipt
+    return render_template("payment_receipt_view.html", school=school, payment=payment)
+
+
+# NOTE: A comprehensive PDF generation function would be complex and is omitted
+# here for brevity, but the route structure is provided.
+
+@app.route("/receipts/generate/<int:payment_id>")
+@login_required
+@trial_required
+def generate_receipt(payment_id):
+    # This route would generate the actual PDF. 
+    # Since the `reportlab` logic is complex, this is a placeholder redirect for now.
+    flash("PDF generation feature is under development.", "info")
+    return redirect(url_for("payment_receipt", payment_id=payment_id))
+
+@app.route("/receipts")
+@login_required
+@trial_required
+def receipt_generator_index():
+    # This page might allow searching payments to generate a receipt
+    return render_template("receipt_index.html")
+
 
 # ---------------------------
-# MAIN EXECUTION
+# RUN APP
 # ---------------------------
 if __name__ == "__main__":
-    # Initialize database if running locally
-    with app.app_context():
-        # This will create tables if they don't exist, which is helpful for local development.
-        db.create_all() 
-    app.run(debug=True)
+    # In a production setting (like Render), you would use a proper WSGI server (e.g., Gunicorn)
+    port = int(os.environ.get("PORT", 5000))
+    # It is often better to use debug=False when run in a container/production environment
+    app.run(debug=True, host="0.0.0.0", port=port)
