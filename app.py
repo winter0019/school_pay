@@ -872,6 +872,11 @@ def receipt_generator_index():
     # This page might allow searching payments to generate a receipt
     return render_template("receipt_index.html")
 
+@app.errorhandler(500)
+def internal_server_error(e):
+    app.logger.error(f"Internal Server Error: {e}")
+    return render_template('500.html'), 500
+
 
 # ---------------------------
 # RUN APP
@@ -881,3 +886,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     # It is often better to use debug=False when run in a container/production environment
     app.run(debug=True, host="0.0.0.0", port=port)
+
