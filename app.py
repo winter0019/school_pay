@@ -840,14 +840,15 @@ def delete_fee_structure(fee_id):
 # ---------------------------
 # In app.py, replace the existing @app.route("/receipts/<int:payment_id>") function
 
-@app.route("/receipts/<int:payment_id>")
+# --- PDF GENERATION ROUTE ---
+
+@app.route("/receipts/<int:payment_id>/download", methods=["GET"])
 @login_required
 @trial_required
-def payment_receipt(payment_id):
+def download_receipt(payment_id):
     school = current_school()
     payment = db.session.get(Payment, payment_id)
-    
-    # 1. Validate payment ownership
+
     if not payment or payment.student.school_id != school.id:
         flash("Receipt not found or access denied.", "danger")
         return redirect(url_for("list_payments"))
@@ -855,38 +856,48 @@ def payment_receipt(payment_id):
     student = payment.student
     term = payment.term
     session_year = payment.session
-    
-    # 2. Get expected fee from FeeStructure (in kobo/cents)
+
+    # 1. Recalculate financial variables (same logic as payment_receipt view)
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student.student_class
     ).first()
-    # expected_amount is in kobo/cents
     expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0
     
-    # 3. Calculate total paid for this term/session (Payment.amount_paid is Naira/Primary Currency)
-    # Total paid is the sum of ALL payments for this student for this specific term/session
     total_paid_naira_query = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
         student_id=student.id,
         term=term,
         session=session_year
     ).scalar()
     total_paid_naira = total_paid_naira_query or 0.0
-    # total_paid_kobo is the cumulative amount paid in kobo/cents
     total_paid_kobo = int(round(total_paid_naira * 100))
     
-    # 4. Calculate outstanding (in kobo/cents)
-    outstanding_balance_kobo = expected_amount_kobo - total_paid_kobo
-    outstanding_balance_kobo = max(0, outstanding_balance_kobo) # Cannot be negative
-        
-    # Render the template with the calculated financial data
-    return render_template(
-        "payment_receipt_view.html", 
+    outstanding_balance_kobo = max(0, expected_amount_kobo - total_paid_kobo)
+    
+    # 2. Render the HTML content of the receipt
+    # We use app.jinja_env.get_template for direct template rendering
+    html_template = app.jinja_env.get_template("payment_receipt_view.html")
+    
+    # Render with the required context
+    html_content = html_template.render(
         school=school, 
         payment=payment,
-        expected_amount=expected_amount_kobo, # Pass in kobo/cents
-        total_paid_kobo=total_paid_kobo,       # Pass in kobo/cents
-        outstanding_balance_kobo=outstanding_balance_kobo # Pass in kobo/cents
+        expected_amount=expected_amount_kobo,
+        total_paid_kobo=total_paid_kobo,
+        outstanding_balance_kobo=outstanding_balance_kobo
+    )
+
+    # 3. Convert HTML to PDF using WeasyPrint
+    pdf_file = HTML(string=html_content, base_url=request.url_root).write_pdf()
+    
+    # 4. Create response
+    filename = f"Receipt_{student.reg_number}_{term}_{session_year}.pdf"
+    
+    return send_file(
+        io.BytesIO(pdf_file),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename
     )
 
 # NOTE: A comprehensive PDF generation function would be complex and is omitted
@@ -922,5 +933,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     # It is often better to use debug=False when run in a container/production environment
     app.run(debug=True, host="0.0.0.0", port=port)
+
 
 
