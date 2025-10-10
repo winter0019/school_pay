@@ -382,7 +382,7 @@ def dashboard():
     outstanding_balance_kobo = expected_fees_kobo - total_payments_kobo
     outstanding_balance_kobo = max(0, outstanding_balance_kobo)
 
-    # Subscription status — placeholder for now
+    # Subscription status
     subscription_active = school.subscription_expiry >= datetime.today().date() # Check against expiry date
 
     return render_template(
@@ -662,7 +662,7 @@ def paystack_callback():
     return redirect(url_for("dashboard")) # Redirect to dashboard after successful payment
 
 # ---------------------------
-# PAYMENTS ROUTES
+# PAYMENTS ROUTES (UPDATED FOR FILTERING AND PAGINATION)
 # ---------------------------
 @app.route("/payments")
 @login_required
@@ -670,15 +670,54 @@ def paystack_callback():
 def list_payments():
     school = current_school()
     
-    all_payments = (
-        Payment.query.join(Student)
-        .filter(Student.school_id == school.id)
-        .order_by(Payment.payment_date.desc())
-        .all()
-    )
+    # --- 1. Get Query Parameters from URL ---
+    page = request.args.get('page', 1, type=int)
+    per_page = 10 # Define how many items per page
     
-    # Renders the payment list, which links to 'generate_receipt'
-    return render_template("payments_list.html", payments=all_payments)
+    # Filters
+    search = request.args.get('search', '').strip()
+    term = request.args.get('term', '').strip()
+    session_year = request.args.get('session', '').strip()
+
+    # --- 2. Build Base Query ---
+    # Start with all payments belonging to the current school, joining Student to filter
+    query = Payment.query.join(Student).filter(Student.school_id == school.id)
+
+    # --- Apply Filters ---
+    
+    # 2a. Search Filter (by student name or registration number)
+    if search:
+        query = query.filter(
+            db.or_(
+                Student.name.ilike(f"%{search}%"),
+                Student.reg_number.ilike(f"%{search}%")
+            )
+        )
+
+    # 2b. Term Filter
+    if term:
+        query = query.filter(Payment.term == term)
+
+    # 2c. Session Filter
+    if session_year:
+        query = query.filter(Payment.session.ilike(f"%{session_year}%"))
+
+    # --- 3. Apply Ordering and Pagination ---
+    query = query.order_by(Payment.payment_date.desc())
+    
+    # Paginate the final result
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    # --- 4. Render Template ---
+    return render_template(
+        "payments_list.html",
+        payments=pagination.items,
+        pagination=pagination,
+        # Pass the search parameters back to the template for use in pagination links
+        search=search,
+        term=term,
+        session_year=session_year
+    )
 
 @app.route("/add-payment", methods=["GET", "POST"])
 @login_required
