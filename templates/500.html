@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>500 - Server Error</title>
+  <!-- Load Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Custom font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen p-4">
+  <div class="max-w-md w-full bg-white p-8 rounded-xl shadow-2xl text-center border-t-4 border-red-500">
+    <!-- Icon for Error -->
+    <div class="text-6xl text-red-500 mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M11.001 10C11.001 9.44772 11.4477 9 12.0001 9C12.5524 9 13.0001 9.44772 13.0001 10V14C13.0001 14.5523 12.5524 15 12.0001 15C11.4477 15 11.0001 14.5523 11.0001 14V10Z" />
+        <path fill-rule="evenodd" d="M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12ZM13.0001 16H11.0001V18H13.0001V16Z" clip-rule="evenodd" />
+      </svg>
+    </div>
+    <h1 class="text-4xl font-extrabold text-gray-900 mb-2">500</h1>
+    <h2 class="text-2xl font-semibold text-gray-700 mb-4">Internal Server Error</h2>
+    <p class="text-gray-600 mb-6">
+      Oh no! Something went wrong on our side. We've been notified and are looking into the issue.
+      <br>Please try navigating back or refreshing the page.
+    </p>
+    <a href="/" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition duration-150 ease-in-out">
+      Go to Homepage
+    </a>
+  </div>
+</body>
+</html>
