@@ -44,13 +44,14 @@
                 {% set current_endpoint = request.endpoint %}
                 
                 <a href="{{ url_for('dashboard') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'dashboard' %}bg-indigo-700{% endif %}">Dashboard</a>
+                
                 <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'students' %}bg-indigo-700{% endif %}">Students</a>
                 
                 <a href="{{ url_for('list_payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'list_payments' %}bg-indigo-700{% endif %}">Payments</a>
                 
                 <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'add_payment' %}bg-indigo-700{% endif %}">Add Payment</a>
 
-            <a href="{{ url_for('receipt_generator_index') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'receipt_generator_index' %}bg-indigo-700{% endif %}">Receipt Generator</a>
+                <a href="{{ url_for('receipt_generator_index') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'receipt_generator_index' %}bg-indigo-700{% endif %}">Receipt Generator</a>
                 
                 <a href="{{ url_for('fee_structure') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'fee_structure' %}bg-indigo-700{% endif %}">Fee Structure</a>
                 
