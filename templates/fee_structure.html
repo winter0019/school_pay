@@ -1,0 +1,75 @@
+{% extends "layout.html" %}
+
+{% block page_title %}Fee Structure Management{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h3 class="text-xl font-semibold text-gray-700 mb-4">Add or Update Fee for a Class</h3>
+        <form method="POST" action="{{ url_for('fee_structure') }}" class="space-y-4">
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                <div>
+                    <label for="class_name" class="block text-sm font-medium text-gray-700">Class Name</label>
+                    <input type="text" id="class_name" name="class_name" 
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border" 
+                           placeholder="e.g., JSS1, Grade 7" required>
+                    <p class="mt-1 text-xs text-gray-500">If class name already exists, the fee will be updated.</p>
+                </div>
+
+                <div>
+                    <label for="expected_amount" class="block text-sm font-medium text-gray-700">Expected Amount (₦)</label>
+                    <input type="number" step="0.01" min="0" id="expected_amount" name="expected_amount" 
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border" 
+                           placeholder="e.g., 50000.00" required>
+                </div>
+            </div>
+
+            <button type="submit" 
+                    class="w-full md:w-auto px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                Save Fee Structure
+            </button>
+        </form>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md">
+        <h3 class="text-xl font-semibold text-gray-700 mb-4">Current Fee Structures</h3>
+
+        {% if fee_structures %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Class</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected Fee</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for fee in fee_structures %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ fee.class_name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ fee.expected_amount | currency_format }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <a href="#" onclick="document.getElementById('class_name').value='{{ fee.class_name }}'; document.getElementById('expected_amount').value='{{ (fee.expected_amount / 100.0)|round(2) }}'; window.scrollTo(0, 0);" 
+                               class="text-indigo-600 hover:text-indigo-900 mr-4">Edit</a>
+                            
+                            <form action="{{ url_for('delete_fee_structure', fee_id=fee.id) }}" method="POST" class="inline" 
+                                  onsubmit="return confirm('Are you sure you want to delete the fee structure for {{ fee.class_name }}? This action is permanent.');">
+                                <button type="submit" class="text-red-600 hover:text-red-900">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-gray-500">No fee structures defined yet. Use the form above to get started!</p>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
