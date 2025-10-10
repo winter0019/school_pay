@@ -159,7 +159,7 @@ def trial_required(f):
             # Exempt payment/auth/receipt endpoints from restriction
             unprotected_endpoints = [
                 subscription_endpoint, 'paystack_callback', 'logout', 
-                'index', 'register', 'payment_receipt', 'generate_receipt', 'receipt_generator_index'
+                'index', 'register', 'receipt_generator_index', 'generate_receipt' # Corrected endpoint name
             ]
             
             if request.endpoint not in unprotected_endpoints:
@@ -553,6 +553,31 @@ def student_financials():
         "outstanding": outstanding_kobo / 100.0 
     })
 
+@app.route("/student/<int:student_id>/payments", methods=["GET"])
+@login_required
+@trial_required
+def get_student_payments(student_id):
+    """API endpoint to fetch all payments for a specific student."""
+    school = current_school()
+    student = db.session.get(Student, student_id)
+    
+    if not student or student.school_id != school.id:
+        # Return an empty array instead of a 404 error if student is not found or access denied
+        app.logger.warning(f"Access denied for student ID: {student_id} or student not found.")
+        return jsonify(payments=[]), 200
+
+    payments = Payment.query.filter_by(student_id=student_id).order_by(Payment.payment_date.desc()).all()
+    
+    payments_data = [{
+        "id": p.id,
+        "amount_paid": p.amount_paid,
+        "date": p.payment_date.isoformat(), # Use ISO format for JS compatibility
+        "term": p.term,
+        "session": p.session
+    } for p in payments]
+    
+    return jsonify(payments=payments_data)
+
 # ---------------------------
 # PAYSTACK INTEGRATION ROUTES
 # ---------------------------
@@ -639,7 +664,6 @@ def paystack_callback():
 # ---------------------------
 # PAYMENTS ROUTES
 # ---------------------------
-# FIX: Added 'payments' route to prevent 'BuildError' if a template link uses 'payments'
 @app.route("/payments")
 @login_required
 @trial_required
@@ -653,7 +677,7 @@ def list_payments():
         .all()
     )
     
-    # Assume a template named 'payments_list.html' exists
+    # Renders the payment list, which links to 'generate_receipt'
     return render_template("payments_list.html", payments=all_payments)
 
 @app.route("/add-payment", methods=["GET", "POST"])
@@ -665,7 +689,6 @@ def add_payment():
     if request.method == "POST":
         student_id = request.form.get("student_id")
         
-        # ... (rest of POST logic remains the same)
         if not student_id:
             if request.accept_mimetypes.accept_json:
                 return jsonify(error="No student selected."), 400
@@ -704,13 +727,14 @@ def add_payment():
                         "term": new_payment.term,
                         "session": new_payment.session,
                         "date": new_payment.payment_date.strftime("%Y-%m-%d %H:%M"),
-                        # Added redirect URL for client-side navigation
-                        "redirect_url": url_for("payment_receipt", payment_id=new_payment.id)
+                        # Fixed redirect URL to use 'generate_receipt'
+                        "redirect_url": url_for("generate_receipt", payment_id=new_payment.id) 
                     }), 200 # <-- CRITICAL: ADDED STATUS CODE 200
                 
                 # Standard (non-AJAX) success path
                 flash("Payment added successfully", "success")
-                return redirect(url_for("payment_receipt", payment_id=new_payment.id))
+                # Fixed redirect URL to use 'generate_receipt'
+                return redirect(url_for("generate_receipt", payment_id=new_payment.id))
 
             # If create_new_payment failed but didn't throw an exception (e.g., returned None)
             if request.accept_mimetypes.accept_json:
@@ -801,116 +825,16 @@ def fee_structure():
     # Get a list of unique class names currently in use by students
     active_classes = db.session.query(Student.student_class)\
         .filter_by(school_id=school.id)\
-        .distinct()\
-        .order_by(Student.student_class)\
-        .all()
+        .group_by(Student.student_class).all()
         
-    # Convert list of tuples/objects to a simple list of strings
-    active_class_names = [cls[0] for cls in active_classes]
+    active_class_names = [c[0] for c in active_classes]
 
-    return render_template(
-        "fee_structure.html", 
-        fee_structures=fee_structures,
-        active_class_names=active_class_names
-    )
+    return render_template("fee_structure.html", fee_structures=fee_structures, active_classes=active_class_names)
+
 
 # ---------------------------
-# FEE STRUCTURE DELETE
+# RECEIPT ROUTES (FIXED AND ADDED)
 # ---------------------------
-@app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
-@login_required
-@trial_required
-def delete_fee_structure(fee_id):
-    school = current_school()
-    fee = db.session.get(FeeStructure, fee_id)
-    
-    # Critical security check: Ensure the fee structure belongs to the current school
-    if not fee or fee.school_id != school.id:
-        flash("Fee structure not found or you don't have permission to delete it.", "danger")
-        return redirect(url_for("fee_structure"))
-        
-    db.session.delete(fee)
-    db.session.commit()
-    flash(f"Fee structure for '{fee.class_name}' deleted successfully.", "success")
-    
-    return redirect(url_for("fee_structure"))
-
-# ---------------------------
-# RECEIPT ROUTES (Placeholders for now)
-# ---------------------------
-# In app.py, replace the existing @app.route("/receipts/<int:payment_id>") function
-
-# --- PDF GENERATION ROUTE ---
-
-@app.route("/receipts/<int:payment_id>/download", methods=["GET"])
-@login_required
-@trial_required
-def download_receipt(payment_id):
-    school = current_school()
-    payment = db.session.get(Payment, payment_id)
-
-    if not payment or payment.student.school_id != school.id:
-        flash("Receipt not found or access denied.", "danger")
-        return redirect(url_for("list_payments"))
-
-    student = payment.student
-    term = payment.term
-    session_year = payment.session
-
-    # 1. Recalculate financial variables (same logic as payment_receipt view)
-    fee_structure = FeeStructure.query.filter_by(
-        school_id=school.id,
-        class_name=student.student_class
-    ).first()
-    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0
-    
-    total_paid_naira_query = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
-        student_id=student.id,
-        term=term,
-        session=session_year
-    ).scalar()
-    total_paid_naira = total_paid_naira_query or 0.0
-    total_paid_kobo = int(round(total_paid_naira * 100))
-    
-    outstanding_balance_kobo = max(0, expected_amount_kobo - total_paid_kobo)
-    
-    # 2. Render the HTML content of the receipt
-    # We use app.jinja_env.get_template for direct template rendering
-    html_template = app.jinja_env.get_template("payment_receipt_view.html")
-    
-    # Render with the required context
-    html_content = html_template.render(
-        school=school, 
-        payment=payment,
-        expected_amount=expected_amount_kobo,
-        total_paid_kobo=total_paid_kobo,
-        outstanding_balance_kobo=outstanding_balance_kobo
-    )
-
-    # 3. Convert HTML to PDF using WeasyPrint
-    pdf_file = HTML(string=html_content, base_url=request.url_root).write_pdf()
-    
-    # 4. Create response
-    filename = f"Receipt_{student.reg_number}_{term}_{session_year}.pdf"
-    
-    return send_file(
-        io.BytesIO(pdf_file),
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=filename
-    )
-
-# NOTE: A comprehensive PDF generation function would be complex and is omitted
-# here for brevity, but the route structure is provided.
-
-@app.route("/receipts/generate/<int:payment_id>")
-@login_required
-@trial_required
-def generate_receipt(payment_id):
-    # This route would generate the actual PDF. 
-    # Since the `reportlab` logic is complex, this is a placeholder redirect for now.
-    flash("PDF generation feature is under development.", "info")
-    return redirect(url_for("payment_receipt", payment_id=payment_id))
 
 @app.route("/receipts")
 @login_required
@@ -918,8 +842,7 @@ def generate_receipt(payment_id):
 def receipt_generator_index():
     """
     Renders the page where users can search for a student and select a payment
-    to generate a receipt. This matches the 'receipt_generator_index' endpoint 
-    that was hinted in previous tracebacks (if you were using that name).
+    to generate a receipt. This uses the correct endpoint name.
     """
     return render_template("receipt_index.html")
 
@@ -950,7 +873,8 @@ def generate_receipt(payment_id):
         school_id=school.id,
         class_name=payment.student.student_class
     ).first()
-    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0
+    # Stored in kobo/cents
+    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0 
     
     # Calculate previous payments for the same term/session
     previous_payments_naira = db.session.query(db.func.sum(Payment.amount_paid)).filter(
@@ -1064,22 +988,8 @@ def generate_receipt(payment_id):
         mimetype="application/pdf"
     )
 
-
-@app.errorhandler(500)
-def internal_server_error(e):
-    app.logger.error(f"Internal Server Error: {e}")
-    return render_template('500.html'), 500
-
-
-# ---------------------------
-# RUN APP
-# ---------------------------
-if __name__ == "__main__":
-    # In a production setting (like Render), you would use a proper WSGI server (e.g., Gunicorn)
-    port = int(os.environ.get("PORT", 5000))
-    # It is often better to use debug=False when run in a container/production environment
-    app.run(debug=True, host="0.0.0.0", port=port)
-
-
-
-
+if __name__ == '__main__':
+    # Initialize database when running locally
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
