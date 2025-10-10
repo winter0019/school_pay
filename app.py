@@ -1026,9 +1026,11 @@ def generate_receipt(payment_id):
         download_name=filename
     )
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    # It's generally better to let a production server handle the app, 
-    # but for local running/testing:
-    app.run(debug=True)
+if __name__ == "__main__":
+    import os
+    # Get the dynamic port assigned by Render, default to 5000 if not found
+    port = int(os.environ.get("PORT", 5000))
+    # Ensure Flask binds to the external interface (0.0.0.0)
+    app.run(host="0.0.0.0", port=port)
+
+
