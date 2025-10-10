@@ -348,41 +348,50 @@ def logout():
 # ---------------------------
 @app.route("/dashboard")
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required  # Enforce time-based trial restriction
 def dashboard():
     school = current_school()
-    
+    if not school:
+        flash("No school record found. Please log in again.", "danger")
+        return redirect(url_for("login"))
+
     total_students = Student.query.filter_by(school_id=school.id).count()
-    
+
     # Total payments made (stored in Naira/Primary Currency)
-    total_payments_naira = (db.session.query(db.func.sum(Payment.amount_paid))
-                            .join(Student)
-                            .filter(Student.school_id == school.id)
-                            .scalar()) or 0
+    total_payments_naira = (
+        db.session.query(db.func.sum(Payment.amount_paid))
+        .join(Student)
+        .filter(Student.school_id == school.id)
+        .scalar()
+    ) or 0
     total_payments_kobo = int(total_payments_naira * 100)
-    
-    recent_payments = (Payment.query.join(Student)
-                            .filter(Student.school_id == school.id)
-                            .order_by(Payment.payment_date.desc())
-                            .limit(5)
-                            .all())
-    
+
+    recent_payments = (
+        Payment.query.join(Student)
+        .filter(Student.school_id == school.id)
+        .order_by(Payment.payment_date.desc())
+        .limit(5)
+        .all()
+    )
+
     # Calculate Outstanding Balance using Manual Input (in kobo/cents)
     expected_fees_kobo = school.expected_fees_this_term or 0
     outstanding_balance_kobo = expected_fees_kobo - total_payments_kobo
-    
-    # Ensure the balance is not negative (if the school has been overpaid)
     outstanding_balance_kobo = max(0, outstanding_balance_kobo)
-    
+
+    # Subscription status — placeholder for now
+    subscription_active = True
+
     return render_template(
         "dashboard.html",
+        school=school,
+        subscription_active=subscription_active,
         total_students=total_students,
-        # Pass the calculated kobo/cent values
-        total_payments=total_payments_kobo, 
+        total_payments=total_payments_kobo,
         outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
-        school=school,
     )
+
 # ---------------------------
 # SETTINGS/PROFILE PAGE
 # ---------------------------
@@ -1000,3 +1009,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
