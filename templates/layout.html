@@ -48,8 +48,8 @@
                 <a href="{{ url_for('payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'payments' %}bg-indigo-700{% endif %}">Payments</a>
                 <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'add_payment' %}bg-indigo-700{% endif %}">Add Payment</a>
 
-            <!-- Corrected endpoint from 'receipt_generator' to 'generate_receipt' to match the Flask route function name -->
-                <a href="{{ url_for('generate_receipt') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'generate_receipt' %}bg-indigo-700{% endif %}">Receipt Generator</a>
+            <!-- CRITICAL FIX: The endpoint must point to a route that requires NO parameters. 'generate_receipt' requires payment_id. Using the new index endpoint. -->
+                <a href="{{ url_for('receipt_generator_index') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'receipt_generator_index' %}bg-indigo-700{% endif %}">Receipt Generator</a>
 
                 <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'pay_with_paystack_subscription' %}bg-indigo-700{% endif %}">Subscription</a>
                 
