@@ -77,14 +77,14 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ fee.term }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ fee.session }}</td>
                         
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ (fee.expected_amount | int) / 100.0 | currency_format }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ ((fee.expected_amount | int) / 100.0) | currency_format }}</td>
                         
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             <a href="#" onclick="
                                 document.getElementById('class_name').value='{{ fee.class_name }}';
                                 document.getElementById('term').value='{{ fee.term }}';
                                 document.getElementById('session').value='{{ fee.session }}';
-                                document.getElementById('expected_amount').value='{{ ((fee.expected_amount | int) / 100.0)|round(2) }}'; 
+                                document.getElementById('expected_amount').value='{{ (((fee.expected_amount | int) / 100.0))|round(2) }}'; 
                                 window.scrollTo(0, 0);
                             " class="text-indigo-600 hover:text-indigo-900 mr-4">Edit</a>
                             
