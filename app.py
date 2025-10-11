@@ -80,15 +80,11 @@ class School(db.Model):
     name = db.Column(db.String(150), nullable=False, unique=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    # Changed to Date only for simpler comparison
-    subscription_expiry = db.Column(db.Date, nullable=False) 
+    subscription_expiry = db.Column(db.Date, nullable=False)
     logo_filename = db.Column(db.String(250), nullable=True)
     address = db.Column(db.String(250), nullable=True)
     phone_number = db.Column(db.String(50), nullable=True)
-    
-    # NEW FIELD for manually tracking total expected fees (stored in kobo/cents)
-    expected_fees_this_term = db.Column(db.Integer, default=0) 
-    
+    expected_fees_this_term = db.Column(db.Integer, default=0)
     students = db.relationship("Student", backref="school", lazy=True)
 
 class Student(db.Model):
@@ -101,33 +97,27 @@ class Student(db.Model):
 
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    # NOTE: Assuming amount_paid is stored in the primary currency unit (Naira)
-    amount_paid = db.Column(db.Float, nullable=False) 
+    amount_paid = db.Column(db.Float, nullable=False) # Stored in Naira (Float)
     payment_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     payment_type = db.Column(db.String(100))
     term = db.Column(db.String(20))
     session = db.Column(db.String(20))
     student_id = db.Column(db.Integer, db.ForeignKey("student.id"), nullable=False)
 
-class Fee(db.Model):
-    # DEPRECATED model, kept for old references
-    id = db.Column(db.Integer, primary_key=True)
-    student_class = db.Column(db.String(50), nullable=False)
-    term = db.Column(db.String(20), nullable=False)
-    session = db.Column(db.String(20), nullable=False)
-    amount = db.Column(db.Float, nullable=False)
-    school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
-
-# NEW MODEL: FeeStructure
+# NEW MODEL: FeeStructure (UPDATED TO INCLUDE TERM AND SESSION)
 class FeeStructure(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     class_name = db.Column(db.String(50), nullable=False)
+    term = db.Column(db.String(20), nullable=False) # Added Term
+    session = db.Column(db.String(20), nullable=False) # Added Session
     # Stored in kobo/cents for precision
-    expected_amount = db.Column(db.Integer, nullable=False, default=0)
+    expected_amount = db.Column(db.Integer, nullable=False, default=0) 
     school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
     
-    __table_args__ = (db.UniqueConstraint('school_id', 'class_name', name='_school_class_uc'),)
-
+    __table_args__ = (
+        db.UniqueConstraint('school_id', 'class_name', 'term', 'session', name='_school_class_term_session_uc'),
+        # Note: You should remove or comment out the old Fee model if it's no longer used.
+    )
 
 # ---------------------------
 # HELPERS
@@ -1112,6 +1102,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
