@@ -57,7 +57,15 @@ class Config:
 
 app = Flask(__name__)
 app.config.from_object(Config)
-
+# In app.py, add this function after db/migrate initialization, before routes
+def get_logo_path(school):
+    """
+    Returns the URL for the school's logo, or None if no logo is set.
+    """
+    if school and school.logo_filename:
+        # Use url_for to generate the public URL for the browser
+        return url_for('static', filename=f'logos/{school.logo_filename}')
+    return None
 # Ensure the upload directory exists
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
@@ -1046,4 +1054,5 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
