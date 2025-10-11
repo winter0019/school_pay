@@ -1127,54 +1127,40 @@ def download_receipt(payment_id):
 # ---------------------------
 # FEE STRUCTURE ROUTES
 # ---------------------------
-
 @app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
-@trial_required
 def fee_structure():
-    """Handles listing, adding, and updating class fee structures."""
-    school = current_school()
-
     if request.method == "POST":
-        class_name = request.form.get("class_name", "").strip()
-        amount_naira_str = request.form.get("amount", "")
-        
         try:
-            # Convert Naira/Primary currency to Kobo/Cents for storage
-            amount_naira = float(amount_naira_str)
-            expected_amount_kobo = int(round(amount_naira * 100))
+            raw_amount = request.form.get("expected_amount", "").strip()
+
+            # Remove any formatting like ₦, commas, or spaces
+            cleaned_amount = raw_amount.replace(",", "").replace("₦", "").replace("₦", "").strip()
+
+            # Convert safely (handles both integers and decimals)
+            expected_amount = int(float(cleaned_amount))
         except (ValueError, TypeError):
             flash("Invalid amount entered.", "danger")
-            return redirect(url_for('fee_structure'))
+            return redirect(url_for("fee_structure"))
 
-        if not class_name or expected_amount_kobo <= 0:
-            flash("Class name and a positive amount are required.", "danger")
-            return redirect(url_for('fee_structure'))
+        # Continue saving FeeStructure entry...
+        new_fee = FeeStructure(
+            class_name=request.form["class_name"],
+            term=request.form["term"],
+            session=request.form["session"],
+            expected_amount=expected_amount,
+            school_id=current_user.id,  # or current_school.id
+        )
 
-        # Check if structure already exists for this class
-        fee = FeeStructure.query.filter_by(school_id=school.id, class_name=class_name).first()
-        
-        if fee:
-            # Update existing fee structure
-            fee.expected_amount = expected_amount_kobo
-            flash(f"Fee structure for {class_name} updated successfully.", "success")
-        else:
-            # Create new fee structure
-            new_fee = FeeStructure(
-                school_id=school.id,
-                class_name=class_name,
-                expected_amount=expected_amount_kobo
-            )
-            db.session.add(new_fee)
-            flash(f"Fee structure for {class_name} added successfully.", "success")
-
+        db.session.add(new_fee)
         db.session.commit()
-        return redirect(url_for('fee_structure'))
+        flash("Fee structure added successfully!", "success")
+        return redirect(url_for("fee_structure"))
 
-    # GET Request: Display all fee structures
-    fees = FeeStructure.query.filter_by(school_id=school.id).all()
-    
-    return render_template("fee_structure.html", fees=fees)
+    # If GET request:
+    fee_structures = FeeStructure.query.filter_by(school_id=current_user.id).all()
+    return render_template("fee_structure.html", fee_structures=fee_structures)
+
 
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
 @login_required
@@ -1200,6 +1186,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
