@@ -26,18 +26,20 @@
     <div id="payment-list-container" class="bg-white p-6 rounded-lg shadow-md hidden">
         <h3 class="text-xl font-semibold text-gray-700 mb-4">Payments for Selected Student</h3>
         
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-                <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Term / Session</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                </tr>
-            </thead>
-            <tbody id="payments-table-body" class="bg-white divide-y divide-gray-200">
-            </tbody>
-        </table>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Term / Session</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="payments-table-body" class="bg-white divide-y divide-gray-200">
+                </tbody>
+            </table>
+        </div>
         
         <p id="no-payments-message" class="text-gray-500 mt-4 hidden">No payments found for this student.</p>
     </div>
@@ -54,11 +56,16 @@
     const selectedStudentName = document.getElementById('selected-student-name');
     const noPaymentsMessage = document.getElementById('no-payments-message');
 
-    // CRITICAL FIX: Generate the base URLs using the correct endpoints.
-    // We use a placeholder ID (0) which the JS will replace.
-    // Assuming 'view_receipt' is the HTML preview route, and 'download_receipt' is the PDF route.
-    const viewReceiptBaseUrl = "{{ url_for('view_receipt', payment_id=0) }}";
-    const downloadReceiptBaseUrl = "{{ url_for('download_receipt', payment_id=0) }}";
+    // CRITICAL FIX: The endpoint name must be 'generate_receipt', not 'view_receipt'.
+    // We append a trailing slash to the base URL to prepare for ID insertion.
+    const viewReceiptBaseUrl = "{{ url_for('generate_receipt', payment_id=0) }}".replace('0', '');
+    const downloadReceiptBaseUrl = "{{ url_for('download_receipt', payment_id=0) }}".replace('0', '');
+
+    // Helper function to format Naira
+    function formatNaira(amount) {
+        if (typeof amount !== 'number') return '₦0.00';
+        return '₦' + amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
 
     // 1. Search Student Logic
     searchInput.addEventListener('input', function() {
@@ -79,7 +86,7 @@
                         data.students.forEach(student => {
                             const resultItem = document.createElement('div');
                             resultItem.className = 'p-3 cursor-pointer hover:bg-indigo-100 border-b';
-                            resultItem.textContent = `${student.name} (${student.reg_number}, ${student.student_class})`;
+                            resultItem.textContent = `${student.name} (Reg: ${student.reg_number}, Class: ${student.student_class})`;
                             resultItem.setAttribute('data-student-id', student.id);
                             resultItem.setAttribute('data-student-name', student.name);
                             resultItem.addEventListener('click', selectStudent);
@@ -89,7 +96,10 @@
                         searchResultsDiv.innerHTML = '<div class="p-3 text-gray-500">No students found.</div>';
                     }
                 })
-                .catch(error => console.error('Error fetching search results:', error));
+                .catch(error => {
+                    console.error('Error fetching search results:', error);
+                    searchResultsDiv.innerHTML = '<div class="p-3 text-red-500">Error searching.</div>';
+                });
         }, 300); // 300ms debounce
     });
 
@@ -98,9 +108,9 @@
         selectedStudentId = event.currentTarget.getAttribute('data-student-id');
         const name = event.currentTarget.getAttribute('data-student-name');
         
+        // Update UI
         searchInput.value = name; 
         searchResultsDiv.innerHTML = '';
-
         selectedStudentName.textContent = `${name} (ID: ${selectedStudentId})`;
         studentInfoBox.classList.remove('hidden');
         
@@ -109,12 +119,13 @@
     
     // 3. Fetch Payments for Selected Student
     function fetchPayments(studentId) {
-        // Fetch all payments for this student
+        paymentsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-indigo-600">Loading payments...</td></tr>';
+        noPaymentsMessage.classList.add('hidden');
+        paymentListContainer.classList.remove('hidden');
+
         fetch(`/student/${studentId}/payments`) 
             .then(response => {
-                // Ensure successful HTTP status is treated as OK
                 if (!response.ok) {
-                    // Log the error but continue to parse JSON if possible, otherwise return empty array
                     console.error('API response not OK:', response.status);
                     return { payments: [] }; 
                 }
@@ -127,16 +138,16 @@
                     data.payments.forEach(payment => {
                         const row = document.createElement('tr');
                         
-                        // 💥 FIX APPLIED HERE: Construct URL by replacing the placeholder '0' with the actual ID.
-                        const viewUrl = viewReceiptBaseUrl.replace('/0', '/' + payment.id);
-                        const downloadUrl = downloadReceiptBaseUrl.replace('/0', '/' + payment.id);
+                        // Clean URL Construction
+                        const viewUrl = viewReceiptBaseUrl + payment.id;
+                        const downloadUrl = downloadReceiptBaseUrl + payment.id;
 
                         row.innerHTML = `
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 ${new Date(payment.date).toLocaleDateString()}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-green-600 font-semibold">
-                                ₦${(payment.amount_paid).toLocaleString('en-NG', { minimumFractionDigits: 2 })}
+                                ${formatNaira(payment.amount_paid)}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 ${payment.term} / ${payment.session}
@@ -151,19 +162,14 @@
                         `;
                         paymentsTableBody.appendChild(row);
                     });
-                    paymentListContainer.classList.remove('hidden');
-                    noPaymentsMessage.classList.add('hidden');
                 } else {
                     noPaymentsMessage.classList.remove('hidden');
-                    paymentListContainer.classList.remove('hidden'); 
                 }
             })
             .catch(error => {
                 console.error('Error fetching payments:', error);
-                paymentsTableBody.innerHTML = '';
-                noPaymentsMessage.textContent = 'Error loading payments.';
-                noPaymentsMessage.classList.remove('hidden');
-                paymentListContainer.classList.remove('hidden');
+                paymentsTableBody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-red-500">Failed to load payments.</td></tr>';
+                noPaymentsMessage.classList.add('hidden');
             });
     }
 
