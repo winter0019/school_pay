@@ -125,17 +125,26 @@ class FeeStructure(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     class_name = db.Column(db.String(50), nullable=False)
-    term = db.Column(db.String(20), nullable=True)       # temporarily allow NULL
-    session = db.Column(db.String(20), nullable=True)    # temporarily allow NULL
-    expected_amount = db.Column(db.Integer, nullable=False, default=0)  # stored in kobo (₦1.00 = 100)
+    term = db.Column(db.String(20), nullable=True)        # Temporarily allow NULL
+    session = db.Column(db.String(20), nullable=True)     # Temporarily allow NULL
+    expected_amount = db.Column(db.Integer, nullable=False, default=0)  # Stored in Kobo (₦1.00 = 100)
     school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
 
+    # ✅ Relationship back to School
+    school = db.relationship("School", back_populates="fee_structures", lazy=True)
+
+    # ✅ Prevent duplicate entries for same class, term, and session within one school
     __table_args__ = (
         db.UniqueConstraint(
-            'school_id', 'class_name', 'term', 'session',
-            name='_school_class_term_session_uc'
+            "school_id", "class_name", "term", "session",
+            name="_school_class_term_session_uc"
         ),
     )
+
+    def __repr__(self):
+        term_display = self.term or "N/A"
+        session_display = self.session or "N/A"
+        return f"<FeeStructure {self.class_name} | Term: {term_display} | Session: {session_display}>"
 
     # Relationship back to the School model (optional but recommended)
     school = db.relationship("School", back_populates="fee_structures", lazy=True)
@@ -1191,6 +1200,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
