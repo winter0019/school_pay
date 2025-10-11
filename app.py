@@ -883,11 +883,12 @@ def generate_receipt(payment_id):
     )
 
 # --- Replacement for the existing download_receipt function in app.py ---
+# --- Replacement for the existing download_receipt function in app.py ---
 @app.route("/receipt/download/<int:payment_id>")
 @login_required
 @trial_required
 def download_receipt(payment_id):
-    """Generates a PDF receipt and sends it as a download, including the logo."""
+    """Generates a PDF receipt and sends it as a download, including the logo and outstanding balance."""
     school = current_school()
     payment = db.session.get(Payment, payment_id)
 
@@ -900,35 +901,43 @@ def download_receipt(payment_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
+    # --- Financial Calculation (ASSUMED HELPER FUNCTIONS EXIST) ---
+    # NOTE: You MUST replace these placeholders with your actual calculation logic
+    # that fetches data from your database (e.g., FeeStructure, other Payments).
+    
+    # Example: Query the total expected amount for this student's class, term, and session
+    # expected_amount = get_expected_fee(student.student_class, payment.term, payment.session)
+    # total_paid = get_total_paid_for_period(student.id, payment.term, payment.session)
+    
+    # --- Placeholder values (REPLACE THESE) ---
+    expected_amount = 100000.00 # Example: ₦100,000.00
+    total_paid = 70000.00      # Example: ₦70,000.00 (Total paid including this receipt)
+    # --- End Placeholder values ---
+    
+    outstanding_balance = expected_amount - total_paid
+
     # Define logo space and margins
     LOGO_MARGIN_X = 50
-    TEXT_START_X = 150  # Start text at 150 to clear the 80pt-wide logo + 20pt margin
+    TEXT_START_X = 150 
     LOGO_WIDTH = 80
     LOGO_HEIGHT = 80
-    TOP_Y_POS = height - 20 # Start Y position for top elements
+    TOP_Y_POS = height - 20 
 
     # ----------------------------------------------------
-    # FIX 1: Load Logo using absolute path logic (recommended best practice)
-    # This ensures it works even if you had relative path issues before
+    # Logo Drawing (Left-aligned)
     # ----------------------------------------------------
     logo_path = None
     if school.logo_filename:
-        # Assuming you've defined UPLOAD_FOLDER = os.path.join("static", "logos")
-        # ReportLab needs the absolute path
         logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], school.logo_filename)
-
         if not os.path.exists(logo_path):
             logo_path = None
-            app.logger.warning(f"Logo not found at absolute path: {logo_path}")
 
-    # Draw the logo if found
     if logo_path:
         try:
-            # FIX 2: Draw on the LEFT side (X-coordinate = LOGO_MARGIN_X)
             c.drawImage(
                 logo_path, 
-                LOGO_MARGIN_X, # X: Left side margin
-                TOP_Y_POS - LOGO_HEIGHT, # Y: Positioned from the top
+                LOGO_MARGIN_X, 
+                TOP_Y_POS - LOGO_HEIGHT, 
                 width=LOGO_WIDTH, 
                 height=LOGO_HEIGHT, 
                 preserveAspectRatio=True, 
@@ -937,12 +946,8 @@ def download_receipt(payment_id):
         except Exception as e:
             app.logger.error(f"Failed to draw logo onto PDF: {e}")
     # ----------------------------------------------------
-
-    # ----------------------------------------------------
-    # FIX 3: Shift all header text to clear the logo area
-    # ----------------------------------------------------
     
-    # Title and School Info (Shifted right to TEXT_START_X)
+    # Title and School Info
     c.setFont("Helvetica-Bold", 16)
     c.drawString(TEXT_START_X, height - 50, "Official School Fee Receipt")
     
@@ -951,14 +956,13 @@ def download_receipt(payment_id):
     c.drawString(TEXT_START_X, height - 85, f"Address: {school.address or 'N/A'}")
     c.drawString(TEXT_START_X, height - 100, f"Phone: {school.phone_number or 'N/A'}")
     
-    # Receipt Details (These can remain on the right side if desired, 
-    # but adjust if they need to move based on the logo's new left position)
+    # Receipt Details
     c.setFont("Helvetica", 12)
-    c.drawString(400, height - 70, f"Receipt No: {payment.id}") # Moved slightly right (from 300)
-    c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}") # Moved slightly right
+    c.drawString(400, height - 70, f"Receipt No: {payment.id}")
+    c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
     
-    # Student Details (Kept on the left, but below the logo/header block)
-    y_pos = height - 150 # Start further down
+    # Student Details
+    y_pos = height - 150
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y_pos, "--- Student Details ---")
     c.setFont("Helvetica", 10)
@@ -966,7 +970,7 @@ def download_receipt(payment_id):
     c.drawString(50, y_pos - 35, f"Reg. No: {student.reg_number}")
     c.drawString(50, y_pos - 50, f"Class: {student.student_class}")
 
-    # Payment Details (Kept on the left)
+    # Payment Details
     y_pos -= 80
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y_pos, "--- Payment Information ---")
@@ -975,14 +979,46 @@ def download_receipt(payment_id):
     c.drawString(50, y_pos - 35, f"Session: {payment.session}")
     c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
     
-    # Amount Details (Kept on the left)
-    amount_str = f"₦{payment.amount_paid:,.2f}"
+    # Amount Details (Current Payment)
+    current_amount_str = f"₦{payment.amount_paid:,.2f}"
     
     c.setFillColor(colors.green)
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y_pos - 80, "Amount Paid:")
-    c.drawString(200, y_pos - 80, amount_str)
+    c.drawString(50, y_pos - 80, "Amount Received:") # Changed label from 'Amount Paid'
+    c.drawString(200, y_pos - 80, current_amount_str)
     c.setFillColor(colors.black)
+
+    # ----------------------------------------------------
+    # FINANCIAL SUMMARY (New Section)
+    # ----------------------------------------------------
+    summary_y_pos = y_pos - 120 
+    
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, summary_y_pos, "--- Account Status for Period ---")
+    
+    # 1. Expected Fee
+    c.setFont("Helvetica", 10)
+    c.drawString(50, summary_y_pos - 20, "Expected Fee:")
+    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}")
+    
+    # 2. Total Paid (including this payment)
+    c.drawString(50, summary_y_pos - 40, "Total Paid to Date:")
+    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}")
+    
+    # 3. Outstanding Balance (Highlighted)
+    c.setFont("Helvetica-Bold", 12)
+    
+    # Use red if balance is > 0, otherwise green/black
+    if outstanding_balance > 0:
+        c.setFillColor(colors.red)
+    else:
+        c.setFillColor(colors.black)
+
+    c.drawString(50, summary_y_pos - 60, "Outstanding Balance:")
+    c.drawString(200, summary_y_pos - 60, f"₦{outstanding_balance:,.2f}")
+    c.setFillColor(colors.black) # Reset color
+
+    # ----------------------------------------------------
 
     # Footer/Signature
     c.setFont("Helvetica-Oblique", 10)
@@ -1076,6 +1112,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
