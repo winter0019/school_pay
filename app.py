@@ -76,6 +76,8 @@ migrate = Migrate(app, db)
 # MODELS
 # ---------------------------
 class School(db.Model):
+    __tablename__ = "school"
+
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, unique=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -85,7 +87,20 @@ class School(db.Model):
     address = db.Column(db.String(250), nullable=True)
     phone_number = db.Column(db.String(50), nullable=True)
     expected_fees_this_term = db.Column(db.Integer, default=0)
+
+    # Relationship with Student
     students = db.relationship("Student", backref="school", lazy=True)
+
+    # ✅ Relationship with FeeStructure
+    fee_structures = db.relationship(
+        "FeeStructure",
+        back_populates="school",           # Matches FeeStructure.school
+        cascade="all, delete-orphan",
+        lazy=True
+    )
+
+    def __repr__(self):
+        return f"<School {self.name}>"
 
 class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1176,6 +1191,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
