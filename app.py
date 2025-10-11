@@ -108,8 +108,14 @@ class Payment(db.Model):
 class FeeStructure(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     class_name = db.Column(db.String(50), nullable=False)
-    term = db.Column(db.String(20), nullable=True)
-    session = db.Column(db.String(20), nullable=True)
+    term = db.Column(db.String(20), nullable=True)  # temporarily allow NULL
+    session = db.Column(db.String(20), nullable=True)  # temporarily allow NULL
+    expected_amount = db.Column(db.Integer, nullable=False, default=0)
+    school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('school_id', 'class_name', 'term', 'session', name='_school_class_term_session_uc'),
+    )
 
 
     # Stored in kobo/cents for precision
@@ -1165,6 +1171,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
