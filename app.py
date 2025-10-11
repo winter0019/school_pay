@@ -1141,16 +1141,25 @@ def fee_structure():
         app.logger.info(f"Raw amount received: '{raw_amount}'") 
 
         try:
-            # Clean formatting: remove commas, currency signs, spaces
-            cleaned = raw_amount.replace(",", "").replace("₦", "").strip()
-
-            # TEMPORARY DEBUGGING LOGGING
-            app.logger.info(f"Cleaned amount string: '{cleaned}'") 
+            raw_amount = request.form.get("amount", "")
+            
+            # Use regex to remove ALL non-digit/non-decimal characters, 
+            # including special whitespace and currency symbols.
+            import re
+            
+            # This regex keeps only digits and a single decimal point
+            cleaned = re.sub(r'[^\d.]', '', raw_amount) 
+            
+            # Handle empty string (in case the input was just symbols)
+            if not cleaned:
+                raise ValueError("Amount is empty after cleaning.")
 
             amount_naira = float(cleaned)
-            # ... rest of the code ...
-        except (ValueError, TypeError):
-            app.logger.error("Failed to convert amount to float.") # Log the failure
+            # ... rest of the successful code block ...
+            
+        except (ValueError, TypeError) as e:
+            # You can log the error 'e' here for debugging
+            app.logger.error(f"Amount conversion failed: {e} for raw input: {raw_amount}")
             flash("Invalid amount entered.", "danger")
             return redirect(url_for("fee_structure"))
         # ... rest of the route ...
@@ -1208,6 +1217,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
