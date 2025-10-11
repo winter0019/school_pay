@@ -224,7 +224,7 @@ def handle_logo_upload(school):
 def create_new_payment(form_data, student):
     try:
         # Amount expected to be in Naira (or primary currency unit)
-        amount = float(form_data.get("amount") or form_data.get("amount_paid"))  
+        amount = float(form_data.get("amount") or form_data.get("amount_paid")) 
         if amount <= 0:
             flash("Amount must be greater than zero.", "danger")
             return None
@@ -544,7 +544,7 @@ def student_financials():
     # 3. Calculate outstanding (in kobo/cents)
     outstanding_kobo = expected_amount_kobo - total_paid_kobo
     outstanding_kobo = max(0, outstanding_kobo)
-        
+    
     # Convert back to Naira for client-side display in API response
     return jsonify({
         # NOTE: Returning kobo/100 for client display in Naira
@@ -805,74 +805,11 @@ def add_payment():
         except (ValueError, TypeError):
             flash("Invalid student ID in URL.", "danger")
 
-    return render_template("add_payment_global.html", student_to_prefill=student_to_prefill)
+    return render_template("add_payment_global.html", student=student_to_prefill)
 
 
 # ---------------------------
-# FEE STRUCTURE MANAGEMENT
-# ---------------------------
-@app.route("/fee-structure", methods=["GET", "POST"])
-@login_required
-@trial_required
-def fee_structure():
-    school = current_school()
-    
-    if request.method == "POST":
-        class_name = request.form.get('class_name').strip()
-        expected_amount_naira = request.form.get('expected_amount').strip()
-        
-        if not class_name or not expected_amount_naira:
-            flash("Class name and expected amount are required.", "danger")
-            return redirect(url_for('fee_structure'))
-
-        try:
-            # Convert Naira input to kobo/cents for storage
-            expected_amount_kobo = int(float(expected_amount_naira) * 100)
-            if expected_amount_kobo < 0:
-                raise ValueError("Amount cannot be negative.")
-        except ValueError:
-            flash("Invalid amount entered.", "danger")
-            return redirect(url_for('fee_structure'))
-
-        # Check for existing structure for this class
-        existing_fee = FeeStructure.query.filter_by(
-            school_id=school.id, 
-            class_name=class_name
-        ).first()
-
-        if existing_fee:
-            # Update existing fee
-            existing_fee.expected_amount = expected_amount_kobo
-            db.session.commit()
-            flash(f"Fee structure for {class_name} updated successfully.", "success")
-        else:
-            # Create new fee
-            new_fee = FeeStructure(
-                school_id=school.id,
-                class_name=class_name,
-                expected_amount=expected_amount_kobo
-            )
-            db.session.add(new_fee)
-            db.session.commit()
-            flash(f"Fee structure for {class_name} created successfully.", "success")
-
-        return redirect(url_for('fee_structure'))
-
-    # GET Request: Display all fee structures
-    fee_structures = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.class_name).all()
-    
-    # Get a list of unique class names currently in use by students
-    active_classes = db.session.query(Student.student_class)\
-        .filter_by(school_id=school.id)\
-        .group_by(Student.student_class).all()
-        
-    active_class_names = [c[0] for c in active_classes]
-
-    return render_template("fee_structure.html", fee_structures=fee_structures, active_classes=active_class_names)
-
-
-# ---------------------------
-# RECEIPT ROUTES (FIXED AND ADDED)
+# RECEIPT GENERATION ROUTES
 # ---------------------------
 
 @app.route("/receipts")
@@ -880,155 +817,132 @@ def fee_structure():
 @trial_required
 def receipt_generator_index():
     """
-    Renders the page where users can search for a student and select a payment
-    to generate a receipt. This uses the correct endpoint name.
+    Renders the interactive search page (receipt_index.html)
+    used to select a student and view their payments.
     """
+    # This route should only render the template which contains the JS search logic
     return render_template("receipt_index.html")
 
 
-@app.route("/generate-receipt/<int:payment_id>")
+@app.route("/receipt/view/<int:payment_id>")
 @login_required
+@trial_required
 def generate_receipt(payment_id):
     """
-    Generates and returns the PDF receipt for a specific payment ID.
-    This replaces the problematic 'payment_receipt' endpoint.
+    Generates and displays the HTML preview of the receipt.
+    NOTE: Renamed to 'generate_receipt' to match the endpoint suggested by Flask in the error.
     """
     school = current_school()
-    
-    # Eagerly load student data in the query
-    payment = (
-        db.session.query(Payment)
-        .join(Student)
-        .filter(Payment.id == payment_id, Student.school_id == school.id)
-        .first()
-    )
+    payment = db.session.get(Payment, payment_id)
 
-    if not payment:
+    # 1. Check if payment exists and belongs to the current school
+    if not payment or payment.student.school_id != school.id:
         flash("Payment not found or access denied.", "danger")
         return redirect(url_for("dashboard"))
 
-    # Fetch Fee Structure (Expected Fee)
+    student = payment.student
+    
+    # 2. Get financial data for the receipt (current outstanding balance)
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
-        class_name=payment.student.student_class
+        class_name=student.student_class
     ).first()
-    # Stored in kobo/cents
-    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0 
-    
-    # Calculate previous payments for the same term/session
-    previous_payments_naira = db.session.query(db.func.sum(Payment.amount_paid)).filter(
-        Payment.student_id == payment.student_id,
+    expected_amount_naira = (fee_structure.expected_amount / 100.0) if fee_structure else 0.0
+
+    total_paid_naira_query = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+        Payment.student_id == student.id,
         Payment.term == payment.term,
-        Payment.session == payment.session,
-        Payment.id < payment.id # Sum payments recorded BEFORE this one
-    ).scalar() or 0.0
-
-    # Total paid this term (including this payment)
-    total_paid_naira = previous_payments_naira + payment.amount_paid
-    total_paid_kobo = int(round(total_paid_naira * 100))
+        Payment.session == payment.session
+    ).scalar()
+    total_paid_naira = total_paid_naira_query or 0.0
     
-    # Outstanding balance (in kobo)
-    outstanding_kobo = max(0, expected_amount_kobo - total_paid_kobo)
+    # Calculate balance *after* this specific payment was made (or as of now)
+    outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
 
-    # --- PDF Generation Logic ---
+    # 3. Render the HTML receipt template
+    return render_template(
+        "receipt_view.html",
+        school=school,
+        payment=payment,
+        student=student,
+        expected_amount=expected_amount_naira,
+        total_paid=total_paid_naira,
+        outstanding_balance=outstanding_balance_naira,
+        logo_path=get_logo_path(school)
+    )
+
+@app.route("/receipt/download/<int:payment_id>")
+@login_required
+@trial_required
+def download_receipt(payment_id):
+    """Generates a PDF receipt and sends it as a download."""
+    school = current_school()
+    payment = db.session.get(Payment, payment_id)
+
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment not found or access denied.", "danger")
+        return redirect(url_for("dashboard"))
+
+    student = payment.student
     buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
+    c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    
-    # Load Logo (if exists)
-    logo_path = get_logo_path(school)
-    if logo_path and os.path.exists(logo_path):
-        try:
-            # Resize and draw logo
-            logo_width = 50
-            logo_height = 50
-            p.drawImage(logo_path, 50, height - 80, width=logo_width, height=logo_height)
-        except Exception as e:
-            app.logger.error(f"Error drawing logo: {e}")
 
-    # Header
-    p.setFont("Helvetica-Bold", 16)
-    p.drawString(120, height - 70, school.name.upper())
-    p.setFont("Helvetica", 10)
-    p.drawString(120, height - 85, f"Address: {school.address or 'N/A'}")
-    p.drawString(120, height - 100, f"Phone: {school.phone_number or 'N/A'}")
-    p.drawString(400, height - 70, f"Date: {payment.payment_date.strftime('%d %b, %Y')}")
+    # Title and School Info
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, height - 50, "Official School Fee Receipt")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(50, height - 70, f"School: {school.name}")
+    c.drawString(50, height - 85, f"Address: {school.address or 'N/A'}")
+    c.drawString(50, height - 100, f"Phone: {school.phone_number or 'N/A'}")
+    
+    # Receipt Details
+    c.setFont("Helvetica", 12)
+    c.drawString(300, height - 70, f"Receipt No: {payment.id}")
+    c.drawString(300, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
+    
+    # Student Details
+    y_pos = height - 130
+    c.drawString(50, y_pos, "--- Student Details ---")
+    c.drawString(50, y_pos - 20, f"Name: {student.name}")
+    c.drawString(50, y_pos - 35, f"Reg. No: {student.reg_number}")
+    c.drawString(50, y_pos - 50, f"Class: {student.student_class}")
 
-    # Title
-    p.setFont("Helvetica-Bold", 20)
-    p.drawCentredString(width / 2, height - 140, "OFFICIAL PAYMENT RECEIPT")
+    # Payment Details
+    y_pos -= 80
+    c.drawString(50, y_pos, "--- Payment Information ---")
+    c.drawString(50, y_pos - 20, f"Term: {payment.term}")
+    c.drawString(50, y_pos - 35, f"Session: {payment.session}")
+    c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
+    
+    # Amount Details
+    amount_str = f"₦{payment.amount_paid:,.2f}"
+    
+    c.setFillColor(colors.green)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_pos - 80, "Amount Paid:")
+    c.drawString(200, y_pos - 80, amount_str)
+    c.setFillColor(colors.black)
 
-    # Payment Details Box
-    box_y = height - 200
-    p.setFillColor(colors.lightgrey)
-    p.rect(50, box_y - 5, width - 100, 110, fill=1)
-    p.setFillColor(colors.black)
+    # Footer/Signature
+    c.setFont("Helvetica-Oblique", 10)
+    c.drawString(50, 50, "This is an electronically generated receipt and requires no signature.")
     
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(60, box_y + 90, "Receipt No:")
-    p.drawString(60, box_y + 70, "Student Name:")
-    p.drawString(60, box_y + 50, "Registration No:")
-    p.drawString(60, box_y + 30, "Class:")
-    
-    p.drawString(300, box_y + 90, "Payment Date:")
-    p.drawString(300, box_y + 70, "Payment Type:")
-    p.drawString(300, box_y + 50, "Term / Session:")
-    
-    p.setFont("Helvetica", 12)
-    p.drawString(170, box_y + 90, f"P-{payment.id:06}")
-    p.drawString(170, box_y + 70, payment.student.name.title())
-    p.drawString(170, box_y + 50, payment.student.reg_number.upper())
-    p.drawString(170, box_y + 30, payment.student.student_class)
-    
-    p.drawString(410, box_y + 90, payment.payment_date.strftime('%Y-%m-%d'))
-    p.drawString(410, box_y + 70, payment.payment_type)
-    p.drawString(410, box_y + 50, f"{payment.term} / {payment.session}")
-
-    # Amount Section
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(60, box_y - 40, "AMOUNT PAID:")
-    p.setFillColor(colors.green)
-    p.drawString(200, box_y - 40, f"₦{payment.amount_paid:,.2f}")
-    p.setFillColor(colors.black)
-
-    # Summary
-    summary_y = box_y - 120
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(60, summary_y, "Term Financial Summary:")
-    
-    p.setFont("Helvetica", 10)
-    p.drawString(60, summary_y - 20, "Expected Total Fee:")
-    p.drawString(60, summary_y - 40, "Total Paid (Cumulative):")
-    p.drawString(60, summary_y - 60, "Outstanding Balance:")
-    
-    p.setFont("Helvetica-Bold", 10)
-    p.drawString(200, summary_y - 20, f"₦{expected_amount_kobo/100:,.2f}")
-    p.drawString(200, summary_y - 40, f"₦{total_paid_naira:,.2f}")
-    
-    p.setFillColor(colors.red if outstanding_kobo > 0 else colors.green)
-    p.drawString(200, summary_y - 60, f"₦{outstanding_kobo/100:,.2f}")
-    p.setFillColor(colors.black)
-
-    # Footer
-    p.setFont("Helvetica", 10)
-    p.drawString(60, 100, "....................................................")
-    p.drawString(60, 85, f"{school.name} Management Signature")
-
-    p.showPage()
-    p.save()
-    
+    c.showPage()
+    c.save()
     buffer.seek(0)
-    filename = f"Receipt_P{payment.id:06}_{payment.student.reg_number}.pdf"
+    
+    filename = f"receipt_{payment.id}_{student.reg_number}.pdf"
     
     return send_file(
         buffer,
         as_attachment=True,
         download_name=filename,
-        mimetype="application/pdf"
+        mimetype='application/pdf'
     )
 
-if __name__ == '__main__':
-    # Initialize database when running locally
+if __name__ == "__main__":
     with app.app_context():
         db.create_all()
     app.run(debug=True)
