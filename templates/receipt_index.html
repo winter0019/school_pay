@@ -15,7 +15,7 @@
         </form>
 
         <div id="search-results" class="mt-4 bg-gray-50 border border-gray-200 rounded-md max-h-60 overflow-y-auto">
-            </div>
+        </div>
 
         <div id="student-info-box" class="mt-6 p-4 border-l-4 border-indigo-500 bg-indigo-50 hidden">
             <p class="font-semibold text-indigo-700">Selected Student:</p>
@@ -36,7 +36,7 @@
                 </tr>
             </thead>
             <tbody id="payments-table-body" class="bg-white divide-y divide-gray-200">
-                </tbody>
+            </tbody>
         </table>
         
         <p id="no-payments-message" class="text-gray-500 mt-4 hidden">No payments found for this student.</p>
@@ -53,6 +53,12 @@
     const paymentsTableBody = document.getElementById('payments-table-body');
     const selectedStudentName = document.getElementById('selected-student-name');
     const noPaymentsMessage = document.getElementById('no-payments-message');
+
+    // CRITICAL FIX: Generate the base URLs using the correct endpoints.
+    // We use a placeholder ID (0) which the JS will replace.
+    // Assuming 'view_receipt' is the HTML preview route, and 'download_receipt' is the PDF route.
+    const viewReceiptBaseUrl = "{{ url_for('view_receipt', payment_id=0) }}";
+    const downloadReceiptBaseUrl = "{{ url_for('download_receipt', payment_id=0) }}";
 
     // 1. Search Student Logic
     searchInput.addEventListener('input', function() {
@@ -106,7 +112,10 @@
         // Fetch all payments for this student
         fetch(`/student/${studentId}/payments`) 
             .then(response => {
+                // Ensure successful HTTP status is treated as OK
                 if (!response.ok) {
+                    // Log the error but continue to parse JSON if possible, otherwise return empty array
+                    console.error('API response not OK:', response.status);
                     return { payments: [] }; 
                 }
                 return response.json();
@@ -117,7 +126,11 @@
                 if (data.payments && data.payments.length > 0) {
                     data.payments.forEach(payment => {
                         const row = document.createElement('tr');
-                        // IMPORTANT: The url_for call must use 'generate_receipt'
+                        
+                        // 💥 FIX APPLIED HERE: Construct URL by replacing the placeholder '0' with the actual ID.
+                        const viewUrl = viewReceiptBaseUrl.replace('/0', '/' + payment.id);
+                        const downloadUrl = downloadReceiptBaseUrl.replace('/0', '/' + payment.id);
+
                         row.innerHTML = `
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                 ${new Date(payment.date).toLocaleDateString()}
@@ -128,9 +141,12 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 ${payment.term} / ${payment.session}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                <a href="{{ url_for('generate_receipt', payment_id=0) }}".replace('/0', '/'+payment.id) }" 
-                                   class="text-indigo-600 hover:text-indigo-900">View/Generate Receipt</a>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                <a href="${viewUrl}" 
+                                   class="text-indigo-600 hover:text-indigo-900" target="_blank">View</a>
+                                <span>|</span>
+                                <a href="${downloadUrl}" 
+                                   class="text-red-600 hover:text-red-900" target="_blank">PDF</a>
                             </td>
                         `;
                         paymentsTableBody.appendChild(row);
