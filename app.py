@@ -122,8 +122,23 @@ class FeeStructure(db.Model):
 # ---------------------------
 # HELPERS
 # ---------------------------
+
+# NOTE: This section assumes the following are defined/imported at the top of app.py:
+# import os
+# from datetime import datetime
+# from functools import wraps
+# from io import BytesIO
+# from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash, jsonify
+# from flask_sqlalchemy import SQLAlchemy (db object is created from this)
+# from werkzeug.utils import secure_filename
+# from sqlalchemy import func
+# from PIL import Image
+# And the models (School, Student, Payment, FeeStructure) are accessible.
+
 def current_school():
+    """Retrieves the current school object from the database using the session ID."""
     if "school_id" in session:
+        # Use .get() which returns None if ID not found, avoiding an exception
         return db.session.get(School, session["school_id"])
     return None
 
@@ -135,15 +150,12 @@ def login_required(f):
         if not school:
             flash("Please log in first.", "warning")
             return redirect(url_for("index"))
-        
-        # NOTE: Removed complex trial logic here, now handled by @trial_required
         return f(*args, **kwargs)
     return decorated_function
 
 def trial_required(f):
     """
-    NEW DECORATOR: Checks if the user's subscription (time-based) has expired.
-    If expired, redirects them to the subscription renewal page.
+    DECORATOR: Checks if the user's subscription (time-based) has expired.
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -153,11 +165,11 @@ def trial_required(f):
         subscription_endpoint = 'pay_with_paystack_subscription'
         
         # Check if the subscription_expiry date is in the past
-        if school.subscription_expiry is None or school.subscription_expiry < now:
+        if school and (school.subscription_expiry is None or school.subscription_expiry < now):
             # Exempt payment/auth/receipt endpoints from restriction
             unprotected_endpoints = [
                 subscription_endpoint, 'paystack_callback', 'logout', 
-                'index', 'register', 'receipt_generator_index', 'generate_receipt'
+                'index', 'register', 'receipt_generator_index', 'generate_receipt', 'download_receipt'
             ]
             
             if request.endpoint not in unprotected_endpoints:
@@ -168,34 +180,83 @@ def trial_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config["ALLOWED_EXTENSIONS"]
 
 def get_logo_path(school):
+    """Returns the URL for the school's logo, or None for template use."""
     if school and school.logo_filename:
-        # Check if file exists to prevent server crash on missing file
+        # Construct the local path to verify existence before creating a URL
         file_path = os.path.join(app.config["UPLOAD_FOLDER"], school.logo_filename)
         if os.path.exists(file_path):
-            # Return relative path for template use
+            # Return relative URL for browser/template use
             return url_for('static', filename=f'logos/{school.logo_filename}')
     return None
 
+def get_logo_local_path(school):
+    """
+    NEW HELPER: Returns the ABSOLUTE local file path for the logo, or None.
+    This is required by ReportLab for PDF generation.
+    """
+    if school and school.logo_filename:
+        # Construct the ABSOLUTE path
+        local_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], school.logo_filename)
+        if os.path.exists(local_path):
+            return local_path
+        app.logger.warning(f"Logo file NOT found at local path: {local_path}")
+    return None
+
+def get_expected_fee(school_id, student_class, term, session):
+    """
+    NEW HELPER: Retrieves the expected fee amount based on class, term, and session 
+    from FeeStructure. Converts amount from Kobo/Cents (Integer) to Naira (Float).
+    """
+    fee_record = db.session.execute(
+        db.select(FeeStructure.expected_amount).filter_by(
+            school_id=school_id,
+            class_name=student_class,
+            term=term, 
+            session=session 
+        )
+    ).scalar_one_or_none()
+    
+    # Assumption: expected_amount is stored as Integer (Kobo) and must be divided by 100 for Naira (Float)
+    if fee_record is not None:
+        return fee_record / 100.0
+    return 0.0
+
+def get_total_paid_for_period(student_id, term, session):
+    """
+    NEW HELPER: Calculates the total amount paid by a student for a specific term and session.
+    Returns amount in Naira (Float).
+    """
+    total = db.session.execute(
+        db.select(func.sum(Payment.amount_paid)).filter_by(
+            student_id=student_id,
+            term=term,
+            session=session
+        )
+    ).scalar_one_or_none()
+    
+    # Total is already in Naira (Float)
+    return total if total is not None else 0.0
+
+
 def handle_logo_upload(school):
+    """Handles file upload, saves the logo, and updates the school record."""
     if "logo" not in request.files:
         flash("No file part in the request.", "danger")
         return False
     file = request.files["logo"]
     if file.filename == '':
-        # This is where a user might intentionally leave the file input blank
-        return True 
+        return True # User left the file field blank
+    
     if not allowed_file(file.filename):
         flash("Invalid file type. Please upload a PNG or JPG.", "danger")
         return False
     
     # Construct filename using school ID and name, then secure it
     ext = file.filename.rsplit('.', 1)[1].lower()
-    # Ensure name is safe for filename
     safe_name = secure_filename(school.name.lower().replace(' ', '_'))
     filename = f"{school.id}_{safe_name}.{ext}"
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
@@ -224,9 +285,10 @@ def handle_logo_upload(school):
         return False
 
 def create_new_payment(form_data, student):
+    """Creates a new Payment record and commits it to the database."""
     try:
         # Amount expected to be in Naira (or primary currency unit)
-        amount = float(form_data.get("amount") or form_data.get("amount_paid")) 
+        amount = float(form_data.get("amount") or form_data.get("amount_paid"))
         if amount <= 0:
             flash("Amount must be greater than zero.", "danger")
             return None
@@ -253,7 +315,6 @@ def create_new_payment(form_data, student):
     db.session.add(payment)
     db.session.commit()
     return payment
-
 # ---------------------------
 # TEMPLATE FILTERS (for display)
 # ---------------------------
@@ -1102,6 +1163,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
