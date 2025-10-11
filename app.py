@@ -874,11 +874,12 @@ def generate_receipt(payment_id):
         logo_path=get_logo_path(school)
     )
 
+# --- Replacement for the existing download_receipt function in app.py ---
 @app.route("/receipt/download/<int:payment_id>")
 @login_required
 @trial_required
 def download_receipt(payment_id):
-    """Generates a PDF receipt and sends it as a download."""
+    """Generates a PDF receipt and sends it as a download, including the logo."""
     school = current_school()
     payment = db.session.get(Payment, payment_id)
 
@@ -890,6 +891,30 @@ def download_receipt(payment_id):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
+    
+    # ----------------------------------------------------
+    # NEW LOGIC: Load and Draw School Logo
+    # ----------------------------------------------------
+    logo_path = None
+    if school.logo_filename:
+        # Construct the absolute file path to the logo
+        logo_path = os.path.join(app.config["UPLOAD_FOLDER"], school.logo_filename)
+        # Check if the file exists locally
+        if not os.path.exists(logo_path):
+            logo_path = None
+    
+    # Draw the logo if found
+    if logo_path:
+        try:
+            # Use drawImage(file_path, x, y, width, height)
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, width - logo_width - 50, height - logo_height - 20, 
+                        width=logo_width, height=logo_height, preserveAspectRatio=True, anchor='n')
+        except Exception as e:
+            app.logger.error(f"Failed to draw logo onto PDF: {e}")
+            # Continue generating the PDF without the logo if there's an error
+    # ----------------------------------------------------
 
     # Title and School Info
     c.setFont("Helvetica-Bold", 16)
@@ -1021,3 +1046,4 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
