@@ -1131,22 +1131,29 @@ def download_receipt(payment_id):
 @login_required
 @trial_required
 def fee_structure():
-    """Handles listing, adding, and updating class fee structures."""
     school = current_school()
 
     if request.method == "POST":
-        class_name = request.form.get("class_name", "").strip()
-        raw_amount = request.form.get("amount", "").strip()
+        # ... gather fields ...
+        raw_amount = request.form.get("amount", "")
+
+        # TEMPORARY DEBUGGING LOGGING
+        app.logger.info(f"Raw amount received: '{raw_amount}'") 
 
         try:
-            # Clean formatting: remove commas, ₦ signs, spaces
+            # Clean formatting: remove commas, currency signs, spaces
             cleaned = raw_amount.replace(",", "").replace("₦", "").strip()
+
+            # TEMPORARY DEBUGGING LOGGING
+            app.logger.info(f"Cleaned amount string: '{cleaned}'") 
+
             amount_naira = float(cleaned)
-            expected_amount_kobo = int(round(amount_naira * 100))
+            # ... rest of the code ...
         except (ValueError, TypeError):
+            app.logger.error("Failed to convert amount to float.") # Log the failure
             flash("Invalid amount entered.", "danger")
             return redirect(url_for("fee_structure"))
-
+        # ... rest of the route ...
         if not class_name or expected_amount_kobo <= 0:
             flash("Class name and a positive amount are required.", "danger")
             return redirect(url_for("fee_structure"))
@@ -1201,6 +1208,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
