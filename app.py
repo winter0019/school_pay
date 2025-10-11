@@ -106,26 +106,31 @@ class Payment(db.Model):
 
 # NEW MODEL: FeeStructure (UPDATED TO INCLUDE TERM AND SESSION)
 class FeeStructure(db.Model):
+    __tablename__ = "fee_structure"
+
     id = db.Column(db.Integer, primary_key=True)
     class_name = db.Column(db.String(50), nullable=False)
-    term = db.Column(db.String(20), nullable=True)  # temporarily allow NULL
-    session = db.Column(db.String(20), nullable=True)  # temporarily allow NULL
-    expected_amount = db.Column(db.Integer, nullable=False, default=0)
+    term = db.Column(db.String(20), nullable=True)       # temporarily allow NULL
+    session = db.Column(db.String(20), nullable=True)    # temporarily allow NULL
+    expected_amount = db.Column(db.Integer, nullable=False, default=0)  # stored in kobo (₦1.00 = 100)
     school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint('school_id', 'class_name', 'term', 'session', name='_school_class_term_session_uc'),
+        db.UniqueConstraint(
+            'school_id', 'class_name', 'term', 'session',
+            name='_school_class_term_session_uc'
+        ),
     )
 
+    # Relationship back to the School model (optional but recommended)
+    school = db.relationship("School", back_populates="fee_structures", lazy=True)
 
-    # Stored in kobo/cents for precision
-    expected_amount = db.Column(db.Integer, nullable=False, default=0) 
-    school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
-    
-    __table_args__ = (
-        db.UniqueConstraint('school_id', 'class_name', 'term', 'session', name='_school_class_term_session_uc'),
-        # Note: You should remove or comment out the old Fee model if it's no longer used.
-    )
+    # Helper method to format amount neatly for templates
+    def formatted_amount(self):
+        return f"₦{self.expected_amount / 100:,.2f}"
+
+    def __repr__(self):
+        return f"<FeeStructure {self.class_name} ({self.term or 'N/A'}, {self.session or 'N/A'}) - ₦{self.expected_amount / 100:.2f}>"
 
 # ---------------------------
 # HELPERS
@@ -1171,6 +1176,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
