@@ -1126,69 +1126,70 @@ def download_receipt(payment_id):
     )
 # ---------------------------
 # FEE STRUCTURE ROUTES
-# ---------------------------@app.route("/fee-structure", methods=["GET", "POST"])
+# ---------------------------
+# Add this function to your app.py file alongside your other routes
+@app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
-@trial_required
 def fee_structure():
-    school = current_school()
-
+    from app import db, FeeStructure # Assuming FeeStructure is defined in app.py or models.py
+    
+    # Check for POST request to handle form submission for adding new fees
     if request.method == "POST":
-        import re
+        class_name = request.form.get("class_name").strip()
+        term = request.form.get("term").strip()
+        session = request.form.get("session").strip()
+        expected_amount_float = float(request.form.get("expected_amount"))
+        
+        # Convert to kobo (integer) for storage
+        expected_amount_kobo = int(expected_amount_float * 100)
 
-        # 🧾 Gather and sanitize fields
-        class_name = request.form.get("class_name", "").strip()
-        term = request.form.get("term", "").strip()
-        session_ = request.form.get("session", "").strip()
-        raw_amount = request.form.get("amount", "").strip()
+        school_id = current_user.school_id # Assuming current_user is available via Flask-Login
 
-        app.logger.info(f"[FEE STRUCTURE] Received form data -> "
-                        f"class_name='{class_name}', term='{term}', session='{session_}', amount='{raw_amount}'")
+        # Basic validation (optional, but recommended)
+        if not all([class_name, term, session, expected_amount_kobo]):
+            flash("All fields are required.", "danger")
+            return redirect(url_for('fee_structure'))
 
-        # 🚫 Validate required fields
-        if not class_name or not term or not session_ or not raw_amount:
-            flash("All fields (Class, Term, Session, Amount) are required.", "danger")
-            return redirect(url_for("fee_structure"))
-
-        # 💰 Clean & convert amount
         try:
-            cleaned = re.sub(r"[^\d.]", "", raw_amount)
-            if not cleaned:
-                raise ValueError("Amount empty after cleaning")
+            # Check for existing fee structure
+            existing_fee = FeeStructure.query.filter_by(
+                school_id=school_id, 
+                class_name=class_name, 
+                term=term, 
+                session=session
+            ).first()
 
-            amount_naira = float(cleaned)
-            if amount_naira <= 0:
-                raise ValueError("Amount must be greater than zero")
+            if existing_fee:
+                flash(f"Fee structure for {class_name}, {term} ({session}) already exists.", "warning")
+            else:
+                new_fee = FeeStructure(
+                    class_name=class_name,
+                    term=term,
+                    session=session,
+                    expected_amount=expected_amount_kobo,
+                    school_id=school_id
+                )
+                db.session.add(new_fee)
+                db.session.commit()
+                flash("Fee Structure added successfully!", "success")
+        
+        except Exception as e:
+            db.session.rollback()
+            # This is the original part that crashed due to missing columns, 
+            # but now that the columns are fixed, it should handle other errors.
+            flash(f"An error occurred while saving: {e}", "danger")
+        
+        return redirect(url_for('fee_structure'))
 
-            expected_amount_kobo = int(round(amount_naira * 100))
-            app.logger.info(f"[FEE STRUCTURE] Parsed amount: ₦{amount_naira:,.2f} ({expected_amount_kobo} kobo)")
+    # Handle GET request (display list of fee structures)
+    fee_structures = FeeStructure.query.filter_by(school_id=current_user.school_id).all()
+    
+    return render_template(
+        "fee_structure.html", 
+        fee_structures=fee_structures,
+        current_endpoint='fee_structure'
+    )
 
-        except (ValueError, TypeError) as e:
-            app.logger.error(f"[FEE STRUCTURE] Amount conversion failed: {e} | Raw input: '{raw_amount}'")
-            flash("Invalid amount entered.", "danger")
-            return redirect(url_for("fee_structure"))
-
-        # 🔍 Check if a fee structure already exists for this class, term, and session
-        existing_fee = FeeStructure.query.filter_by(
-            school_id=school.id,
-            class_name=class_name,
-            term=term,
-            session=session_
-        ).first()
-
-        # 🏗️ Update or create the record
-        if existing_fee:
-            existing_fee.expected_amount = expected_amount_kobo
-            db.session.commit()
-            flash(f"Fee structure for {class_name} ({term}, {session_}) updated successfully.", "success")
-            app.logger.info(f"[FEE STRUCTURE] Updated: {class_name}, {term}, {session_}")
-        else:
-            new_fee = FeeStructure(
-                school_id=school.id,
-                class_name=class_name,
-                term=term,
-                session=session_,
-                expected_amount=expected_amount_kobo,
-            )
             db.session.add(new_fee)
             db.session.commit()
             flash(f"Fee structure for {class_name} ({term}, {session_}) added successfully.", "success")
@@ -1228,6 +1229,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
