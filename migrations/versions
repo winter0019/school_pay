@@ -1,0 +1,25 @@
+"""Manually adding term and session columns to FeeStructure"""
+
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = "54178d053519"  # replace with your actual hash if different
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    # Add the new columns safely (nullable = True to avoid conflicts)
+    with op.batch_alter_table("fee_structure", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("term", sa.String(length=20), nullable=True))
+        batch_op.add_column(sa.Column("session", sa.String(length=20), nullable=True))
+
+
+def downgrade():
+    # Drop the columns if rolling back
+    with op.batch_alter_table("fee_structure", schema=None) as batch_op:
+        batch_op.drop_column("session")
+        batch_op.drop_column("term")
