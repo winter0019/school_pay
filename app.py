@@ -1126,71 +1126,82 @@ def download_receipt(payment_id):
     )
 # ---------------------------
 # FEE STRUCTURE ROUTES
-# ---------------------------
-@app.route("/fee-structure", methods=["GET", "POST"])
+# ---------------------------@app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
 @trial_required
 def fee_structure():
     school = current_school()
 
     if request.method == "POST":
-        # ... gather fields ...
-        raw_amount = request.form.get("amount", "")
+        import re
 
-        # TEMPORARY DEBUGGING LOGGING
-        app.logger.info(f"Raw amount received: '{raw_amount}'") 
+        # 🧾 Gather and sanitize fields
+        class_name = request.form.get("class_name", "").strip()
+        term = request.form.get("term", "").strip()
+        session_ = request.form.get("session", "").strip()
+        raw_amount = request.form.get("amount", "").strip()
 
+        app.logger.info(f"[FEE STRUCTURE] Received form data -> "
+                        f"class_name='{class_name}', term='{term}', session='{session_}', amount='{raw_amount}'")
+
+        # 🚫 Validate required fields
+        if not class_name or not term or not session_ or not raw_amount:
+            flash("All fields (Class, Term, Session, Amount) are required.", "danger")
+            return redirect(url_for("fee_structure"))
+
+        # 💰 Clean & convert amount
         try:
-            raw_amount = request.form.get("amount", "")
-            
-            # Use regex to remove ALL non-digit/non-decimal characters, 
-            # including special whitespace and currency symbols.
-            import re
-            
-            # This regex keeps only digits and a single decimal point
-            cleaned = re.sub(r'[^\d.]', '', raw_amount) 
-            
-            # Handle empty string (in case the input was just symbols)
+            cleaned = re.sub(r"[^\d.]", "", raw_amount)
             if not cleaned:
-                raise ValueError("Amount is empty after cleaning.")
+                raise ValueError("Amount empty after cleaning")
 
             amount_naira = float(cleaned)
-            # ... rest of the successful code block ...
-            
+            if amount_naira <= 0:
+                raise ValueError("Amount must be greater than zero")
+
+            expected_amount_kobo = int(round(amount_naira * 100))
+            app.logger.info(f"[FEE STRUCTURE] Parsed amount: ₦{amount_naira:,.2f} ({expected_amount_kobo} kobo)")
+
         except (ValueError, TypeError) as e:
-            # You can log the error 'e' here for debugging
-            app.logger.error(f"Amount conversion failed: {e} for raw input: {raw_amount}")
+            app.logger.error(f"[FEE STRUCTURE] Amount conversion failed: {e} | Raw input: '{raw_amount}'")
             flash("Invalid amount entered.", "danger")
             return redirect(url_for("fee_structure"))
-        # ... rest of the route ...
-        if not class_name or expected_amount_kobo <= 0:
-            flash("Class name and a positive amount are required.", "danger")
-            return redirect(url_for("fee_structure"))
 
-        # Check if structure already exists for this class
-        fee = FeeStructure.query.filter_by(
-            school_id=school.id, class_name=class_name
+        # 🔍 Check if a fee structure already exists for this class, term, and session
+        existing_fee = FeeStructure.query.filter_by(
+            school_id=school.id,
+            class_name=class_name,
+            term=term,
+            session=session_
         ).first()
 
-        if fee:
-            fee.expected_amount = expected_amount_kobo
-            flash(f"Fee structure for {class_name} updated successfully.", "success")
+        # 🏗️ Update or create the record
+        if existing_fee:
+            existing_fee.expected_amount = expected_amount_kobo
+            db.session.commit()
+            flash(f"Fee structure for {class_name} ({term}, {session_}) updated successfully.", "success")
+            app.logger.info(f"[FEE STRUCTURE] Updated: {class_name}, {term}, {session_}")
         else:
             new_fee = FeeStructure(
                 school_id=school.id,
                 class_name=class_name,
+                term=term,
+                session=session_,
                 expected_amount=expected_amount_kobo,
             )
             db.session.add(new_fee)
-            flash(f"Fee structure for {class_name} added successfully.", "success")
+            db.session.commit()
+            flash(f"Fee structure for {class_name} ({term}, {session_}) added successfully.", "success")
+            app.logger.info(f"[FEE STRUCTURE] Created new: {class_name}, {term}, {session_}")
 
-        db.session.commit()
         return redirect(url_for("fee_structure"))
 
-    # ✅ Use school.id instead of current_user.id
-    fees = FeeStructure.query.filter_by(school_id=school.id).all()
+    # 📊 Display all fee structures for this school
+    fees = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.id.desc()).all()
+    app.logger.info(f"[FEE STRUCTURE] Displaying {len(fees)} records for school_id={school.id}")
 
     return render_template("fee_structure.html", fees=fees)
+
 
 
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
@@ -1217,6 +1228,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
