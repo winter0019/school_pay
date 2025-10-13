@@ -1201,29 +1201,47 @@ def fee_structure():
     # NOTE: You need a 'fee_structure.html' template for this line to work.
     return render_template("fee_structure.html", fees=fees)
 
-@@app.route("/delete-fee-structure/<int:id>", methods=["POST"]) # FIX: Ensure this is <int:id>
+@app.route("/delete-fee-structure/<int:id>", methods=["POST"])
 @login_required
 @trial_required
 def delete_fee_structure(id):
-    # ... rest of the function remains the same, using 'id'
-    ...
-```
-*(If you need to keep your route path as `/delete-fee-structure/<int:fee_id>`, you must change the template call to `id=f.fee_id` or similar.)*
+    from app import db, FeeStructure, app
+    from flask import flash, redirect, url_for
+    # current_user is imported in the actual app for logging context
 
----
+    school = current_school() 
 
-## 2. Secondary Error: Missing Template (`TemplateNotFound`)
+    # 1. Fetch the fee structure, ensuring it belongs to the current school for security.
+    fee_to_delete = FeeStructure.query.filter_by(id=id, school_id=school.id).first()
 
-This error occurred when the user tried to view a receipt:
+    if not fee_to_delete:
+        app.logger.warning(
+            f"[DELETE FEE FAILED] User attempted to delete non-existent or unauthorized fee ID {id} for school {school.id}"
+        )
+        flash("Fee structure not found or unauthorized.", "danger")
+    else:
+        try:
+            class_name = fee_to_delete.class_name
+            
+            # 2. Delete the record and commit
+            db.session.delete(fee_to_delete)
+            db.session.commit()
+            
+            # 3. Success feedback and audit log
+            flash(f"Fee structure for class '{class_name}' deleted successfully.", "success")
+            app.logger.info(
+                f"[DELETE FEE SUCCESS] School {school.id} deleted fee structure ID {id} (Class: {class_name})."
+            )
+            
+        except Exception as e:
+            # 4. Error handling and rollback
+            db.session.rollback()
+            app.logger.error(
+                f"[DELETE FEE FAILED] Database error deleting fee ID {id} for school {school.id}: {e}"
+            )
+            flash("An unexpected database error occurred during deletion.", "danger")
 
-**Error Trace:**
-```
-jinja2.exceptions.TemplateNotFound: receipt_view.html
-```
-**Problem:**
-When the function `generate_receipt` was called for receipt ID 13, it tried to load the template:
-```python
-return render_template("receipt_view.html", ...)
+    return redirect(url_for("fee_structure"))
 
 
 if __name__ == "__main__":
@@ -1232,6 +1250,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
