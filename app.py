@@ -1157,6 +1157,36 @@ def delete_fee_structure(id):
     return redirect(url_for("fee_structure"))
 
 
+@app.route("/delete-fee-structure/<int:id>", methods=["POST"])
+@login_required
+@trial_required
+def delete_fee_structure(id):
+    from app import db, FeeStructure 
+    
+    # Ensure this is a POST request (for security, deletion should not be a simple GET)
+    if request.method != "POST":
+        flash("Invalid request method for deletion.", "danger")
+        return redirect(url_for("fee_structure"))
+
+    school = current_school()
+
+    fee_to_delete = FeeStructure.query.filter_by(id=id, school_id=school.id).first()
+
+    if not fee_to_delete:
+        flash("Fee structure not found or unauthorized.", "danger")
+    else:
+        try:
+            db.session.delete(fee_to_delete)
+            db.session.commit()
+            flash(f"Fee structure for {fee_to_delete.class_name} deleted successfully.", "success")
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"[DELETE FEE] Database error: {e}")
+            flash("An error occurred during deletion.", "danger")
+
+    return redirect(url_for("fee_structure"))
+
+
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
 @login_required
 @trial_required
@@ -1181,6 +1211,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
