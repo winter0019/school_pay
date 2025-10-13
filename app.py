@@ -1124,68 +1124,82 @@ def download_receipt(payment_id):
         download_name=filename,
         mimetype='application/pdf'
     )
+
 # ---------------------------
-# FEE STRUCTURE ROUTES
+# FEE STRUCTURE ROUTES (Create, Read, Update)
 # ---------------------------
-@app.route("/delete-fee-structure/<int:id>", methods=["POST"])
+@app.route("/fee-structure", methods=["GET", "POST"])
 @login_required
 @trial_required
-def delete_fee_structure(id):
-    from app import db, FeeStructure 
-    
-    # Ensure this is a POST request (for security, deletion should not be a simple GET)
-    if request.method != "POST":
-        flash("Invalid request method for deletion.", "danger")
-        return redirect(url_for("fee_structure"))
-
+def fee_structure():
     school = current_school()
 
-    fee_to_delete = FeeStructure.query.filter_by(id=id, school_id=school.id).first()
+    if request.method == "POST":
+        
+        # 🧾 Gather and sanitize fields
+        class_name = request.form.get("class_name", "").strip()
+        term = request.form.get("term", "").strip()
+        session_ = request.form.get("session", "").strip()
+        raw_amount = request.form.get("amount", "").strip()
 
-    if not fee_to_delete:
-        flash("Fee structure not found or unauthorized.", "danger")
-    else:
+        app.logger.info(f"[FEE STRUCTURE] Received form data -> "
+                        f"class_name='{class_name}', term='{term}', session='{session_}', amount='{raw_amount}'")
+
+        # 🚫 Validate required fields
+        if not class_name or not term or not session_ or not raw_amount:
+            flash("All fields (Class, Term, Session, Amount) are required.", "danger")
+            return redirect(url_for("fee_structure"))
+
+        # 💰 Clean & convert amount using helper
         try:
-            db.session.delete(fee_to_delete)
-            db.session.commit()
-            flash(f"Fee structure for {fee_to_delete.class_name} deleted successfully.", "success")
+            expected_amount_kobo, amount_naira = _clean_and_convert_amount(raw_amount)
+            app.logger.info(f"[FEE STRUCTURE] Parsed amount: ₦{amount_naira:,.2f} ({expected_amount_kobo} kobo)")
+        except (ValueError, TypeError) as e:
+            app.logger.error(f"[FEE STRUCTURE] Amount conversion failed: {e} | Raw input: '{raw_amount}'")
+            flash("Invalid amount entered. Please use a numeric value greater than zero.", "danger")
+            return redirect(url_for("fee_structure"))
+
+        # 🔍 Check if a fee structure already exists for this class, term, and session (UPSERT key)
+        existing_fee = FeeStructure.query.filter_by(
+            school_id=school.id,
+            class_name=class_name,
+            term=term,
+            session=session_
+        ).first()
+
+        try:
+            # 🏗️ Update or create the record
+            if existing_fee:
+                existing_fee.expected_amount = expected_amount_kobo
+                db.session.commit()
+                flash(f"Fee structure for {class_name} ({term}, {session_}) updated successfully.", "success")
+                app.logger.info(f"[FEE STRUCTURE] Updated Fee ID {existing_fee.id}: {class_name}, {term}, {session_}")
+            else:
+                new_fee = FeeStructure(
+                    school_id=school.id,
+                    class_name=class_name,
+                    term=term,
+                    session=session_,
+                    expected_amount=expected_amount_kobo,
+                )
+                db.session.add(new_fee)
+                db.session.commit()
+                flash(f"Fee structure for {class_name} ({term}, {session_}) added successfully.", "success")
+                app.logger.info(f"[FEE STRUCTURE] Created new Fee ID {new_fee.id}: {class_name}, {term}, {session_}")
+
         except Exception as e:
             db.session.rollback()
-            app.logger.error(f"[DELETE FEE] Database error: {e}")
-            flash("An error occurred during deletion.", "danger")
+            app.logger.error(f"[FEE STRUCTURE FAILED] Database commit error by user {current_user.id}: {e}")
+            flash("A database error occurred while saving the fee structure.", "danger")
 
-    return redirect(url_for("fee_structure"))
-
-
-@app.route("/delete-fee-structure/<int:id>", methods=["POST"])
-@login_required
-@trial_required
-def delete_fee_structure(id):
-    from app import db, FeeStructure 
-    
-    # Ensure this is a POST request (for security, deletion should not be a simple GET)
-    if request.method != "POST":
-        flash("Invalid request method for deletion.", "danger")
         return redirect(url_for("fee_structure"))
 
-    school = current_school()
+    # 📊 Display all fee structures for this school (GET request)
+    fees = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.id.desc()).all()
+    app.logger.info(f"[FEE STRUCTURE] Displaying {len(fees)} records for school_id={school.id}")
 
-    fee_to_delete = FeeStructure.query.filter_by(id=id, school_id=school.id).first()
-
-    if not fee_to_delete:
-        flash("Fee structure not found or unauthorized.", "danger")
-    else:
-        try:
-            db.session.delete(fee_to_delete)
-            db.session.commit()
-            flash(f"Fee structure for {fee_to_delete.class_name} deleted successfully.", "success")
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"[DELETE FEE] Database error: {e}")
-            flash("An error occurred during deletion.", "danger")
-
-    return redirect(url_for("fee_structure"))
-
+    # NOTE: You need a 'fee_structure.html' template for this line to work.
+    return render_template("fee_structure.html", fees=fees)
 
 @app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
 @login_required
@@ -1211,6 +1225,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
