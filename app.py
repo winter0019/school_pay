@@ -1201,22 +1201,29 @@ def fee_structure():
     # NOTE: You need a 'fee_structure.html' template for this line to work.
     return render_template("fee_structure.html", fees=fees)
 
-@app.route("/fee-structure/delete/<int:fee_id>", methods=["POST"])
+@@app.route("/delete-fee-structure/<int:id>", methods=["POST"]) # FIX: Ensure this is <int:id>
 @login_required
 @trial_required
-def delete_fee_structure(fee_id):
-    """Deletes a specific fee structure entry."""
-    school = current_school()
-    fee = db.session.get(FeeStructure, fee_id)
+def delete_fee_structure(id):
+    # ... rest of the function remains the same, using 'id'
+    ...
+```
+*(If you need to keep your route path as `/delete-fee-structure/<int:fee_id>`, you must change the template call to `id=f.fee_id` or similar.)*
 
-    if not fee or fee.school_id != school.id:
-        flash("Fee structure not found or access denied.", "danger")
-    else:
-        db.session.delete(fee)
-        db.session.commit()
-        flash(f"Fee structure for {fee.class_name} deleted.", "success")
+---
 
-    return redirect(url_for('fee_structure'))
+## 2. Secondary Error: Missing Template (`TemplateNotFound`)
+
+This error occurred when the user tried to view a receipt:
+
+**Error Trace:**
+```
+jinja2.exceptions.TemplateNotFound: receipt_view.html
+```
+**Problem:**
+When the function `generate_receipt` was called for receipt ID 13, it tried to load the template:
+```python
+return render_template("receipt_view.html", ...)
 
 
 if __name__ == "__main__":
@@ -1225,6 +1232,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
