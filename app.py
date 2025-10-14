@@ -4,6 +4,7 @@ from functools import wraps
 from io import BytesIO
 import requests
 import json
+import re
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, send_file, flash, jsonify
@@ -352,6 +353,40 @@ def create_new_payment(form_data, student):
     db.session.add(payment)
     db.session.commit()
     return payment
+
+def _clean_and_convert_amount(raw_amount):
+    """
+    Cleans a user-input currency string (like '₦50,000' or '50.000')
+    and converts it to naira (float) and kobo (int).
+
+    Returns:
+        (expected_amount_kobo, amount_naira)
+    Raises:
+        ValueError: if input is invalid or zero/negative.
+    """
+    if not raw_amount:
+        raise ValueError("Amount is empty")
+
+    # Remove all characters except digits and dot
+    cleaned = re.sub(r"[^\d.]", "", raw_amount)
+    if not cleaned:
+        raise ValueError("Amount empty after cleaning")
+
+    try:
+        # Convert to float (handles both '50.000' and '50,000')
+        amount_naira = float(cleaned.replace(",", ""))
+    except ValueError:
+        raise ValueError(f"Invalid number format: {raw_amount}")
+
+    if amount_naira <= 0:
+        raise ValueError("Amount must be greater than zero")
+
+    expected_amount_kobo = int(round(amount_naira * 100))
+    return expected_amount_kobo, amount_naira
+
+
+
+
 # ---------------------------
 # TEMPLATE FILTERS (for display)
 # ---------------------------
@@ -1263,6 +1298,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
