@@ -988,21 +988,34 @@ def download_receipt(payment_id):
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    
-    # --- Financial Calculation (ASSUMED HELPER FUNCTIONS EXIST) ---
-    # NOTE: You MUST replace these placeholders with your actual calculation logic
-    # that fetches data from your database (e.g., FeeStructure, other Payments).
-    
-    # Example: Query the total expected amount for this student's class, term, and session
-    # expected_amount = get_expected_fee(student.student_class, payment.term, payment.session)
-    # total_paid = get_total_paid_for_period(student.id, payment.term, payment.session)
-    
-    # --- Placeholder values (REPLACE THESE) ---
-    expected_amount = 100000.00 # Example: ₦100,000.00
-    total_paid = 70000.00      # Example: ₦70,000.00 (Total paid including this receipt)
-    # --- End Placeholder values ---
-    
+
+    # --- ✅ Fetch actual values ---
+    # 1️⃣ Get expected fee for student's class, term, and session
+    fee_structure = FeeStructure.query.filter_by(
+        school_id=school.id,
+        class_name=student.student_class,
+        term=payment.term,
+        session=payment.session
+    ).first()
+
+    expected_amount = (fee_structure.expected_amount / 100) if fee_structure else 0.0
+
+    # 2️⃣ Get total paid so far for that term/session
+    total_paid_kobo = db.session.query(db.func.sum(Payment.amount)).filter_by(
+        student_id=student.id,
+        term=payment.term,
+        session=payment.session
+    ).scalar() or 0
+
+    total_paid = total_paid_kobo / 100
     outstanding_balance = expected_amount - total_paid
+
+    # --- Use these real values ---
+    c.drawString(100, height - 150, f"Expected Amount: ₦{expected_amount:,.2f}")
+    c.drawString(100, height - 170, f"Total Paid: ₦{total_paid:,.2f}")
+    c.drawString(100, height - 190, f"Outstanding Balance: ₦{outstanding_balance:,.2f}")
+    # continue your PDF rendering...
+
 
     # Define logo space and margins
     LOGO_MARGIN_X = 50
@@ -1250,6 +1263,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
