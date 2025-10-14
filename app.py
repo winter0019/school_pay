@@ -1036,14 +1036,18 @@ def download_receipt(payment_id):
     expected_amount = (fee_structure.expected_amount / 100) if fee_structure else 0.0
 
     # 2️⃣ Get total paid so far for that term/session
-    total_paid_kobo = db.session.query(db.func.sum(Payment.amount)).filter_by(
-        student_id=student.id,
-        term=payment.term,
-        session=payment.session
+    # Corrected Section
+     # Corrected Section
+    total_paid_kobo = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
+       student_id=student.id,
+       term=payment.term,
+       session=payment.session
     ).scalar() or 0
 
     total_paid = total_paid_kobo / 100
     outstanding_balance = expected_amount - total_paid
+
+
 
     # --- Use these real values ---
     c.drawString(100, height - 150, f"Expected Amount: ₦{expected_amount:,.2f}")
@@ -1298,6 +1302,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
