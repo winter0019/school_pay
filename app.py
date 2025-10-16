@@ -990,8 +990,8 @@ def generate_receipt(payment_id):
         logging.warning(f"Fee structure NOT FOUND using case-insensitive search for Class: '{student.student_class}'")
         expected_amount_naira = 0.0
     else:
-        # Expected amount is assumed to be stored as Naira
-        expected_amount_naira = float(fee_structure.expected_amount)
+        # FIX: The expected_amount must be divided by 100.0 because it appears to be stored in KOBO (e.g., 2000000)
+        expected_amount_naira = float(fee_structure.expected_amount) / 100.0
         logging.info(f"Fee structure FOUND. Expected Amount (Naira): {expected_amount_naira:,.2f} from class: '{fee_structure.class_name}'")
 
 
@@ -1002,9 +1002,10 @@ def generate_receipt(payment_id):
         Payment.session == payment.session
     ).scalar() or 0
     
+    # Total paid (current and aggregate) is assumed to be stored as Naira, so no division by 100.0
     total_paid_naira = float(total_paid_db_value) 
 
-    # Calculate outstanding balance
+    # Calculate outstanding balance (uses the corrected expected_amount_naira)
     outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
     
     logging.info(f"Total Paid (Naira): {total_paid_naira:,.2f}")
@@ -1051,8 +1052,8 @@ def download_receipt(payment_id):
     if not fee_structure:
         expected_amount = 0.0
     else:
-        # Expected amount is assumed to be stored as Naira, so no division by 100.0
-        expected_amount = float(fee_structure.expected_amount) 
+        # FIX: The expected_amount must be divided by 100.0 because it appears to be stored in KOBO (e.g., 2000000)
+        expected_amount = float(fee_structure.expected_amount) / 100.0
 
     # Calculate total paid for this term/session (in database value - assumed Naira)
     total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
@@ -1307,6 +1308,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
