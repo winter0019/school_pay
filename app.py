@@ -970,38 +970,51 @@ def generate_receipt(payment_id):
     school = current_school()
     payment = db.session.get(Payment, payment_id)
 
-    # 1. Validation and Redirect fix
     if not payment or payment.student.school_id != school.id:
         flash("Payment not found or access denied.", "danger")
         return redirect(url_for("receipt_generator_index"))
 
     student = payment.student
+    
+    # --- LOGGING DEBUG: 1 ---
+    logging.info(f"--- Processing Receipt ID: {payment_id} ---")
+    logging.info(f"Student Class: '{student.student_class}'")
+    logging.info(f"School ID: {school.id}")
 
-    # 2. FIX: Fee Structure query modified to look only by class and school ID, 
+    # FIX: Fee Structure query modified to look only by class and school ID, 
     # and the /100.0 conversion is removed to match the data storage pattern.
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student.student_class
-        # Removed term/session filters to allow finding the fee structure
     ).first()
     
-    # FIX: Expected amount is assumed to be stored as Naira, so no division by 100.0
-    expected_amount_naira = float(fee_structure.expected_amount) if fee_structure else 0.0
+    # Check if fee structure was found
+    if not fee_structure:
+        logging.warning(f"Fee structure NOT FOUND for Class: '{student.student_class}' (School ID: {school.id})")
+        expected_amount_naira = 0.0
+    else:
+        expected_amount_naira = float(fee_structure.expected_amount)
+        logging.info(f"Fee structure FOUND. Expected Amount (Naira): {expected_amount_naira:,.2f}")
 
-    # 3. Calculate total paid for this term/session (in database value)
+
+    # Calculate total paid for this term/session (in database value - assumed Naira)
     total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
         Payment.student_id == student.id,
         Payment.term == payment.term,
         Payment.session == payment.session
     ).scalar() or 0
     
-    # FIX: Total paid amount is assumed to be stored as Naira, so no division by 100.0
     total_paid_naira = float(total_paid_db_value) 
 
-    # 4. Calculate outstanding balance
+    # Calculate outstanding balance
     outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
+    
+    # --- LOGGING DEBUG: 2 ---
+    logging.info(f"Total Paid (Naira): {total_paid_naira:,.2f}")
+    logging.info(f"Outstanding Balance: {outstanding_balance_naira:,.2f}")
+    logging.info(f"----------------------------------------")
 
-    # 5. Render the receipt preview
+    # Render the receipt preview
     return render_template(
         "receipt_view.html",
         school=school,
@@ -1022,7 +1035,6 @@ def download_receipt(payment_id):
     school = current_school()
     payment = db.session.get(Payment, payment_id)
 
-    # 1. Validation and Redirect fix
     if not payment or payment.student.school_id != school.id:
         flash("Payment not found or access denied.", "danger")
         return redirect(url_for("receipt_generator_index"))
@@ -1032,23 +1044,27 @@ def download_receipt(payment_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # 2. FIX: Fee Structure query modified to look only by class and school ID.
+    # FIX: Fee Structure query modified to look only by class and school ID.
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student.student_class
     ).first()
 
-    # FIX: Expected amount is assumed to be stored as Naira, so no division by 100.0
-    expected_amount = float(fee_structure.expected_amount) if fee_structure else 0.0
+    # Check if fee structure was found
+    if not fee_structure:
+        expected_amount = 0.0
+    else:
+        # Expected amount is assumed to be stored as Naira, so no division by 100.0
+        expected_amount = float(fee_structure.expected_amount) 
 
-    # 3. Calculate total paid for this term/session (in database value)
+    # Calculate total paid for this term/session (in database value - assumed Naira)
     total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
         Payment.student_id == student.id,
         Payment.term == payment.term,
         Payment.session == payment.session
     ).scalar() or 0
 
-    # FIX: Total paid amount is assumed to be stored as Naira, so no division by 100.0
+    # Total paid amount is assumed to be stored as Naira, so no division by 100.0
     total_paid = float(total_paid_db_value)
     
     outstanding_balance = max(0.0, expected_amount - total_paid)
@@ -1065,11 +1081,11 @@ def download_receipt(payment_id):
     logo_path = None
     if school.logo_filename:
         try:
-            logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
+            logo_path = os.path.join(current_app.root_path, current_app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
         except NameError:
              logo_path = school.logo_filename 
         
-        if not os.path.exists(logo_path):
+        if logo_path and not os.path.exists(logo_path):
             logo_path = None
 
     if logo_path:
@@ -1119,7 +1135,6 @@ def download_receipt(payment_id):
     c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
     
     # Amount Details (Current Payment)
-    # This remains without division by 100.0, as previously fixed.
     current_amount_naira = float(payment.amount_paid) 
     current_amount_str = f"₦{current_amount_naira:,.2f}"
     
@@ -1295,6 +1310,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
