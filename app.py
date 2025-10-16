@@ -977,7 +977,7 @@ def generate_receipt(payment_id):
 
     student = payment.student
 
-    # 2. FIX: Reverting Fee Structure query to include term/session, as originally intended.
+    # 2. Reverting Fee Structure query to include term/session
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student.student_class,
@@ -996,13 +996,12 @@ def generate_receipt(payment_id):
     ).scalar() or 0
     
     # Convert total paid amount to Naira
-    # This must remain divided by 100.0 as it's an aggregate sum.
     total_paid_naira = float(total_paid_kobo_query) / 100.0
 
     # 4. Calculate outstanding balance
     outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
 
-    # 5. Render the receipt preview
+    # 5. Render the receipt preview (Error here fixed by adding receipt_view.html below)
     return render_template(
         "receipt_view.html",
         school=school,
@@ -1056,67 +1055,122 @@ def download_receipt(payment_id):
     outstanding_balance = max(0.0, expected_amount - total_paid)
 
     # 4. Draw PDF elements
-    # ... (omitted layout constants and logo drawing)
+    # Define layout constants
+    LOGO_MARGIN_X = 50
+    TEXT_START_X = 150 
+    LOGO_WIDTH = 80
+    LOGO_HEIGHT = 80
+    TOP_Y_POS = height - 20 
 
-    # --- Current Payment ---
-    # FIX: Remove the division by 100.0 here ONLY to compensate for the database 
-    # saving Naira value (15000) into the kobo field (payment.amount_paid).
-    # The consequence is that other payments saved correctly will be scaled 100x too high.
-    # This is a temporary measure to fix the display for this buggy record.
-    current_amount_kobo = payment.amount_paid
-    current_amount_naira = float(current_amount_kobo) # TEMPORARY: NO DIVISION BY 100.0
+    # --- School Logo ---
+    logo_path = None
+    if school.logo_filename:
+        # Reconstruct path using os.path.join and secure_filename
+        try:
+            logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
+        except NameError:
+             # Fallback if app/config aren't accessible
+             logo_path = school.logo_filename 
+        
+        if not os.path.exists(logo_path):
+            logo_path = None
+
+    if logo_path:
+        try:
+            c.drawImage(
+                logo_path, 
+                LOGO_MARGIN_X, 
+                TOP_Y_POS - LOGO_HEIGHT, 
+                width=LOGO_WIDTH, 
+                height=LOGO_HEIGHT, 
+                preserveAspectRatio=True, 
+                anchor='n'
+            )
+        except Exception as e:
+            logging.error(f"Failed to draw logo onto PDF: {e}")
+            
+    # Title and School Info
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(TEXT_START_X, height - 50, "Official School Fee Receipt")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(TEXT_START_X, height - 70, f"School: {school.name}")
+    c.drawString(TEXT_START_X, height - 85, f"Address: {school.address or 'N/A'}")
+    c.drawString(TEXT_START_X, height - 100, f"Phone: {school.phone_number or 'N/A'}")
+    
+    # Receipt Details
+    c.setFont("Helvetica", 12)
+    c.drawString(400, height - 70, f"Receipt No: {payment.id}")
+    c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
+    
+    # Student Details
+    y_pos = height - 150 # <-- FIX: y_pos is now defined here!
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y_pos, "--- Student Details ---")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y_pos - 20, f"Name: {student.name}")
+    c.drawString(50, y_pos - 35, f"Reg. No: {student.reg_number}")
+    c.drawString(50, y_pos - 50, f"Class: {student.student_class}")
+
+    # Payment Details
+    y_pos -= 80
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y_pos, "--- Payment Information ---")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y_pos - 20, f"Term: {payment.term}")
+    c.drawString(50, y_pos - 35, f"Session: {payment.session}")
+    c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
+    
+    # Amount Details (Current Payment)
+    # Keeping the TEMPORARY FIX: NO DIVISION BY 100.0
+    current_amount_naira = float(payment.amount_paid) 
     current_amount_str = f"₦{current_amount_naira:,.2f}"
     
-    # --- Header & Student Details ---
-    # ... (omitted Header/Details drawing for brevity)
-
-    # [Draw Current Payment]
     c.setFillColor(colors.green)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, y_pos - 80, "Amount Received:")
-    c.drawString(200, y_pos - 80, current_amount_str)
+    c.drawString(200, y_pos - 80, current_amount_str) # This line now works
     c.setFillColor(colors.black)
 
-    # [Draw Summary]
-    summary_y_pos = y_pos - 120
+    # Financial Summary
+    summary_y_pos = y_pos - 120 
+    
     c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, summary_y_pos, "--- Account Summary ---")
-
+    c.drawString(50, summary_y_pos, "--- Account Status for Period ---")
+    
     c.setFont("Helvetica", 10)
     c.drawString(50, summary_y_pos - 20, "Expected Fee:")
-    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}")
+    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}") 
+    
     c.drawString(50, summary_y_pos - 40, "Total Paid to Date:")
-    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}")
-
+    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}") 
+    
+    c.setFont("Helvetica-Bold", 12)
     if outstanding_balance > 0:
         c.setFillColor(colors.red)
     else:
         c.setFillColor(colors.black)
 
-    c.setFont("Helvetica-Bold", 12)
     c.drawString(50, summary_y_pos - 60, "Outstanding Balance:")
     c.drawString(200, summary_y_pos - 60, f"₦{outstanding_balance:,.2f}")
     c.setFillColor(colors.black)
 
-    # --- Footer ---
+    # Footer/Signature
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(50, 50, "This is an electronically generated receipt and requires no signature.")
-
-    # Finalize PDF
+    
     c.showPage()
     c.save()
     buffer.seek(0)
-
+    
     filename = f"receipt_{payment.id}_{student.reg_number}.pdf"
-
+    
     return send_file(
         buffer,
         as_attachment=True,
         download_name=filename,
-        mimetype="application/pdf"
+        mimetype='application/pdf'
     )
-
-
 
 # ---------------------------
 # FEE STRUCTURE ROUTES (Create, Read, Update)
@@ -1243,6 +1297,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
