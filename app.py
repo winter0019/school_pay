@@ -9,7 +9,7 @@ from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, send_file, flash, jsonify
+    session, send_file, flash, jsonify, current_app # <-- ADDED current_app HERE
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -1403,6 +1403,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
