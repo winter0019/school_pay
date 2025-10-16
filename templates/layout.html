@@ -55,6 +55,10 @@
                 
                 <a href="{{ url_for('fee_structure') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'fee_structure' %}bg-indigo-700{% endif %}">Fee Structure</a>
                 
+                <!-- NEW SETTINGS LINK ADDED -->
+                <a href="{{ url_for('settings') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'settings' %}bg-indigo-700{% endif %}">Settings</a>
+                <!-- END NEW SETTINGS LINK -->
+                
                 <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'pay_with_paystack_subscription' %}bg-indigo-700{% endif %}">Subscription</a>
                 
             </nav>
