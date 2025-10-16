@@ -949,6 +949,76 @@ def add_payment():
 # RECEIPT GENERATION ROUTES
 # ---------------------------
 
+@app.route("/receipts")
+@login_required
+@trial_required
+def receipt_generator_index():
+    """
+    Renders the interactive search page (receipt_index.html)
+    used to select a student and view their payments.
+    """
+    # This route only renders the template which contains the JS search logic
+    return render_template("receipt_index.html")
+
+
+@app.route("/receipt/view/<int:payment_id>")
+@login_required
+@trial_required
+def generate_receipt(payment_id):
+    """
+    Generates and displays the HTML preview of the receipt.
+    NOTE: Using 'generate_receipt' to match the endpoint used in templates.
+    """
+    school = current_school()
+    payment = db.session.get(Payment, payment_id)
+
+    # 1. Check if payment exists and belongs to the current school
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment not found or access denied.", "danger")
+        return redirect(url_for("dashboard"))
+
+    student = payment.student
+    
+    # 2. Get financial data for the receipt (current outstanding balance)
+    # Get expected fee for student's class, term, and session
+    fee_structure = FeeStructure.query.filter_by(
+        school_id=school.id,
+        class_name=student.student_class,
+        term=payment.term,
+        session=payment.session
+    ).first()
+    
+    # Convert expected amount from kobo/cents to Naira
+    expected_amount_naira = (fee_structure.expected_amount / 100.0) if fee_structure else 0.0
+
+    # Calculate total paid for the specific term/session (in kobo/cents)
+    # Using func.sum from sqlalchemy import func
+    total_paid_kobo_query = db.session.query(func.sum(Payment.amount_paid)).filter(
+        Payment.student_id == student.id,
+        Payment.term == payment.term,
+        Payment.session == payment.session
+    ).scalar()
+    
+    # Convert total paid amount to Naira
+    total_paid_naira = (total_paid_kobo_query / 100.0) if total_paid_kobo_query else 0.0
+    
+    # Calculate balance *as of now* for this term/session
+    outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
+
+    # 3. Render the HTML receipt template
+    return render_template(
+        "receipt_view.html",
+        school=school,
+        payment=payment,
+        student=student,
+        expected_amount=expected_amount_naira,
+        total_paid=total_paid_naira,
+        outstanding_balance=outstanding_balance_naira,
+        logo_path=get_logo_path(school)
+    )
+
+# --------------------------------------------------------------------------------
+
 @app.route("/receipt/download/<int:payment_id>")
 @login_required
 @trial_required
@@ -962,8 +1032,10 @@ def download_receipt(payment_id):
         return redirect(url_for("dashboard"))
 
     student = payment.student
-
-    # ✅ Fetch actual values
+    
+    # --- Start Financial Calculation ---
+    
+    # 1. Get expected fee for student's class, term, and session
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
         class_name=student.student_class,
@@ -971,63 +1043,86 @@ def download_receipt(payment_id):
         session=payment.session
     ).first()
 
+    # Convert expected amount from kobo/cents to Naira
     expected_amount = (fee_structure.expected_amount / 100.0) if fee_structure else 0.0
 
-    total_paid_kobo = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
-        student_id=student.id,
-        term=payment.term,
-        session=payment.session
+    # 2. Get total paid so far for that term/session (in kobo/cents)
+    # Using func.sum from sqlalchemy import func
+    total_paid_kobo = db.session.query(func.sum(Payment.amount_paid)).filter(
+       Payment.student_id == student.id,
+       Payment.term == payment.term,
+       Payment.session == payment.session
     ).scalar() or 0
 
+    # Convert total paid amount to Naira
     total_paid = total_paid_kobo / 100.0
+    
+    # 3. Calculate Outstanding Balance
     outstanding_balance = expected_amount - total_paid
+    outstanding_balance = max(0.0, outstanding_balance) 
 
-    # ✅ Start PDF
+    # --- End Financial Calculation ---
+
+    # --- Start PDF Generation ---
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # Logo + Header
+    # Define layout constants
     LOGO_MARGIN_X = 50
-    TEXT_START_X = 150
+    TEXT_START_X = 150 
     LOGO_WIDTH = 80
     LOGO_HEIGHT = 80
-    TOP_Y_POS = height - 20
+    TOP_Y_POS = height - 20 
 
+    # ----------------------------------------------------
+    # Logo Drawing 
+    # ----------------------------------------------------
+    # Assuming get_logo_path returns the full path, and app.root_path/app.config["UPLOAD_FOLDER"] 
+    # logic is handled within get_logo_path or is correctly inferred.
+    
     logo_path = None
     if school.logo_filename:
-        logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], school.logo_filename)
+        # Reconstruct path using os.path.join and secure_filename (if needed)
+        # Note: app.root_path and app.config are required for this block to work.
+        try:
+            # Assuming app and app.config are accessible (from the provided imports context)
+            logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
+        except NameError:
+             # Fallback if app/config aren't accessible here; adjust path as needed for your setup
+             logo_path = school.logo_filename 
+        
         if not os.path.exists(logo_path):
             logo_path = None
 
     if logo_path:
         try:
             c.drawImage(
-                logo_path,
-                LOGO_MARGIN_X,
-                TOP_Y_POS - LOGO_HEIGHT,
-                width=LOGO_WIDTH,
-                height=LOGO_HEIGHT,
-                preserveAspectRatio=True,
+                logo_path, 
+                LOGO_MARGIN_X, 
+                TOP_Y_POS - LOGO_HEIGHT, 
+                width=LOGO_WIDTH, 
+                height=LOGO_HEIGHT, 
+                preserveAspectRatio=True, 
                 anchor='n'
             )
         except Exception as e:
-            app.logger.error(f"Failed to draw logo onto PDF: {e}")
-
+            logging.error(f"Failed to draw logo onto PDF: {e}")
+    
     # Title and School Info
     c.setFont("Helvetica-Bold", 16)
     c.drawString(TEXT_START_X, height - 50, "Official School Fee Receipt")
-
+    
     c.setFont("Helvetica", 10)
     c.drawString(TEXT_START_X, height - 70, f"School: {school.name}")
     c.drawString(TEXT_START_X, height - 85, f"Address: {school.address or 'N/A'}")
     c.drawString(TEXT_START_X, height - 100, f"Phone: {school.phone_number or 'N/A'}")
-
+    
     # Receipt Details
     c.setFont("Helvetica", 12)
     c.drawString(400, height - 70, f"Receipt No: {payment.id}")
     c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
-
+    
     # Student Details
     y_pos = height - 150
     c.setFont("Helvetica-Bold", 12)
@@ -1045,9 +1140,11 @@ def download_receipt(payment_id):
     c.drawString(50, y_pos - 20, f"Term: {payment.term}")
     c.drawString(50, y_pos - 35, f"Session: {payment.session}")
     c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
-
+    
     # Amount Details (Current Payment)
-    current_amount_str = f"₦{payment.amount_paid:,.2f}"
+    current_amount_naira = payment.amount_paid / 100.0 # Convert to Naira/Base Currency
+    current_amount_str = f"₦{current_amount_naira:,.2f}"
+    
     c.setFillColor(colors.green)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, y_pos - 80, "Amount Received:")
@@ -1055,44 +1152,53 @@ def download_receipt(payment_id):
     c.setFillColor(colors.black)
 
     # ----------------------------------------------------
-    # FINANCIAL SUMMARY (No duplicates)
+    # FINANCIAL SUMMARY (Account Status) - FIXED
     # ----------------------------------------------------
-    summary_y_pos = y_pos - 120
-
+    summary_y_pos = y_pos - 120 
+    
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, summary_y_pos, "--- Account Status for Period ---")
-
+    
+    # 1. Expected Fee
     c.setFont("Helvetica", 10)
     c.drawString(50, summary_y_pos - 20, "Expected Fee:")
-    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}")
-
+    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}") # Correct variable used
+    
+    # 2. Total Paid (including this payment)
     c.drawString(50, summary_y_pos - 40, "Total Paid to Date:")
-    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}")
-
-    # Outstanding Balance
+    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}") # Correct variable used
+    
+    # 3. Outstanding Balance (Highlighted)
     c.setFont("Helvetica-Bold", 12)
-    c.setFillColor(colors.red if outstanding_balance > 0 else colors.black)
-    c.drawString(50, summary_y_pos - 60, "Outstanding Balance:")
-    c.drawString(200, summary_y_pos - 60, f"₦{outstanding_balance:,.2f}")
-    c.setFillColor(colors.black)
+    
+    # Use red if balance is > 0, otherwise black
+    if outstanding_balance > 0:
+        c.setFillColor(colors.red)
+    else:
+        c.setFillColor(colors.black)
 
-    # Footer
+    c.drawString(50, summary_y_pos - 60, "Outstanding Balance:")
+    c.drawString(200, summary_y_pos - 60, f"₦{outstanding_balance:,.2f}") # Correct variable used
+    c.setFillColor(colors.black) # Reset color
+
+    # ----------------------------------------------------
+
+    # Footer/Signature
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(50, 50, "This is an electronically generated receipt and requires no signature.")
-
+    
     c.showPage()
     c.save()
     buffer.seek(0)
-
+    
     filename = f"receipt_{payment.id}_{student.reg_number}.pdf"
-
+    
     return send_file(
         buffer,
         as_attachment=True,
         download_name=filename,
         mimetype='application/pdf'
     )
-
 
 # ---------------------------
 # FEE STRUCTURE ROUTES (Create, Read, Update)
@@ -1219,6 +1325,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
