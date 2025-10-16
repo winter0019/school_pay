@@ -977,31 +977,31 @@ def generate_receipt(payment_id):
 
     student = payment.student
 
-    # 2. Reverting Fee Structure query to include term/session
+    # 2. FIX: Fee Structure query modified to look only by class and school ID, 
+    # and the /100.0 conversion is removed to match the data storage pattern.
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
-        class_name=student.student_class,
-        term=payment.term,
-        session=payment.session
+        class_name=student.student_class
+        # Removed term/session filters to allow finding the fee structure
     ).first()
     
-    # Convert expected amount from kobo/cents to Naira
-    expected_amount_naira = (float(fee_structure.expected_amount) / 100.0) if fee_structure else 0.0
+    # FIX: Expected amount is assumed to be stored as Naira, so no division by 100.0
+    expected_amount_naira = float(fee_structure.expected_amount) if fee_structure else 0.0
 
-    # 3. Calculate total paid for this term/session (in kobo/cents)
-    total_paid_kobo_query = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+    # 3. Calculate total paid for this term/session (in database value)
+    total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
         Payment.student_id == student.id,
         Payment.term == payment.term,
         Payment.session == payment.session
     ).scalar() or 0
     
-    # Convert total paid amount to Naira
-    total_paid_naira = float(total_paid_kobo_query) / 100.0
+    # FIX: Total paid amount is assumed to be stored as Naira, so no division by 100.0
+    total_paid_naira = float(total_paid_db_value) 
 
     # 4. Calculate outstanding balance
     outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
 
-    # 5. Render the receipt preview (Error here fixed by adding receipt_view.html below)
+    # 5. Render the receipt preview
     return render_template(
         "receipt_view.html",
         school=school,
@@ -1032,26 +1032,25 @@ def download_receipt(payment_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # 2. Reverting Fee Structure query to include term/session
+    # 2. FIX: Fee Structure query modified to look only by class and school ID.
     fee_structure = FeeStructure.query.filter_by(
         school_id=school.id,
-        class_name=student.student_class,
-        term=payment.term,
-        session=payment.session
+        class_name=student.student_class
     ).first()
 
-    # Convert expected amount from kobo/cents to Naira
-    expected_amount = (float(fee_structure.expected_amount) / 100.0) if fee_structure else 0.0
+    # FIX: Expected amount is assumed to be stored as Naira, so no division by 100.0
+    expected_amount = float(fee_structure.expected_amount) if fee_structure else 0.0
 
-    # 3. Calculate total paid for this term/session (in kobo/cents)
-    total_paid_kobo = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+    # 3. Calculate total paid for this term/session (in database value)
+    total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
         Payment.student_id == student.id,
         Payment.term == payment.term,
         Payment.session == payment.session
     ).scalar() or 0
 
-    # Convert total paid amount to Naira
-    total_paid = float(total_paid_kobo) / 100.0
+    # FIX: Total paid amount is assumed to be stored as Naira, so no division by 100.0
+    total_paid = float(total_paid_db_value)
+    
     outstanding_balance = max(0.0, expected_amount - total_paid)
 
     # 4. Draw PDF elements
@@ -1065,11 +1064,9 @@ def download_receipt(payment_id):
     # --- School Logo ---
     logo_path = None
     if school.logo_filename:
-        # Reconstruct path using os.path.join and secure_filename
         try:
             logo_path = os.path.join(app.root_path, app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
         except NameError:
-             # Fallback if app/config aren't accessible
              logo_path = school.logo_filename 
         
         if not os.path.exists(logo_path):
@@ -1104,7 +1101,7 @@ def download_receipt(payment_id):
     c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
     
     # Student Details
-    y_pos = height - 150 # <-- FIX: y_pos is now defined here!
+    y_pos = height - 150
     c.setFont("Helvetica-Bold", 12)
     c.drawString(50, y_pos, "--- Student Details ---")
     c.setFont("Helvetica", 10)
@@ -1122,14 +1119,14 @@ def download_receipt(payment_id):
     c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
     
     # Amount Details (Current Payment)
-    # Keeping the TEMPORARY FIX: NO DIVISION BY 100.0
+    # This remains without division by 100.0, as previously fixed.
     current_amount_naira = float(payment.amount_paid) 
     current_amount_str = f"₦{current_amount_naira:,.2f}"
     
     c.setFillColor(colors.green)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, y_pos - 80, "Amount Received:")
-    c.drawString(200, y_pos - 80, current_amount_str) # This line now works
+    c.drawString(200, y_pos - 80, current_amount_str)
     c.setFillColor(colors.black)
 
     # Financial Summary
@@ -1171,6 +1168,7 @@ def download_receipt(payment_id):
         download_name=filename,
         mimetype='application/pdf'
     )
+
 
 # ---------------------------
 # FEE STRUCTURE ROUTES (Create, Read, Update)
@@ -1297,6 +1295,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
