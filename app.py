@@ -518,20 +518,63 @@ def logout():
     session.pop("school_id", None)
     flash("Logged out.", "info")
     return redirect(url_for("index"))
+
+# Assuming necessary imports like db, Student, Payment, FeeStructure, func, datetime, current_school, current_app are available.
+# Make sure to import current_app from flask, and datetime and date from the datetime module.
+
+# --- HELPER FUNCTION: DYNAMIC OUTSTANDING CALCULATION ---
+# This function is necessary to calculate the outstanding balance by comparing 
+# the Kobo-based FeeStructure amounts with the Naira-based Payment amounts.
+def calculate_total_outstanding_dynamic(school):
+    """
+    Calculates the total outstanding balance across all students.
+    
+    Dynamically sums all expected fees (Kobo -> Naira) and subtracts all total payments (Naira).
+    Returns the result in Naira (float).
+    """
+    # Assuming School, Student, Payment, FeeStructure models and db are globally available.
+    total_outstanding_naira = 0.0
+    students = Student.query.filter_by(school_id=school.id).all()
+    
+    for student in students:
+        # 1. Get ALL Expected Fees for this student's class (case-insensitive fix)
+        fee_structures = FeeStructure.query.filter(
+            FeeStructure.school_id == school.id,
+            FeeStructure.class_name.ilike(student.student_class)
+        ).all()
+        
+        total_expected_naira = 0.0
+        for fee in fee_structures:
+            # Expected Fee is stored in KOBO, so divide by 100.0 to get Naira
+            total_expected_naira += float(fee.expected_amount) / 100.0
+
+        # 2. Get ALL Payments made by this student (Payments stored in Naira)
+        total_paid_naira = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+            Payment.student_id == student.id
+        ).scalar() or 0
+        total_paid_naira = float(total_paid_naira)
+        
+        # 3. Calculate individual outstanding (Only accumulate positive balances)
+        outstanding_naira = total_expected_naira - total_paid_naira
+        
+        if outstanding_naira > 0:
+            total_outstanding_naira += outstanding_naira
+
+    return total_outstanding_naira
+
 # ---------------------------
-# DASHBOARD
+# DASHBOARD (CLEANED AND FIXED)
 # ---------------------------
 @app.route("/dashboard")
 @login_required
-@trial_required # Enforce time-based trial restriction
+@trial_required
 def dashboard():
     school = current_school()
     if not school:
         flash("No school record found. Please log in again.", "danger")
-        return redirect(url_for("index")) 
+        return redirect(url_for("index"))
 
     # We need to assume a current term and session for "Payments This Term"
-    # Assuming a function get_current_term_session() exists or setting mock values:
     current_term, current_session = "Third Term", "2025/2026"
 
     total_students = Student.query.filter_by(school_id=school.id).count()
@@ -543,7 +586,7 @@ def dashboard():
         .join(Student)
         .filter(
             Student.school_id == school.id,
-            Payment.term == current_term, 
+            Payment.term == current_term,
             Payment.session == current_session
         )
         .scalar()
@@ -571,26 +614,24 @@ def dashboard():
     )
 
     # Subscription status
-    subscription_active = school.subscription_expiry >= datetime.today().date() # Check against expiry date
+    subscription_active = school.subscription_expiry >= datetime.today().date()
 
     return render_template(
         "dashboard.html",
         school=school,
         subscription_active=subscription_active,
         total_students=total_students,
-        # Using the corrected 'Payments This Term' calculation
         total_payments=payments_this_term_kobo, 
-        # Using the dynamically calculated outstanding balance
         outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
     )
 
 # ---------------------------
-# SETTINGS/PROFILE PAGE
+# SETTINGS/PROFILE PAGE (CLEANED)
 # ---------------------------
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def settings():
     school = current_school()
 
@@ -600,8 +641,8 @@ def settings():
         school.email = request.form.get('email')
         school.address = request.form.get('address')
         school.phone_number = request.form.get('phone_number')
-         
-        # 2. Process Expected Total Fees (No longer used by dashboard outstanding logic, but kept for legacy/other reports)
+        
+        # 2. Process Expected Total Fees 
         try:
             expected_naira = float(request.form.get('expected_fees_this_term', 0))
             # Rounding to prevent floating point errors before converting to int for kobo
@@ -617,48 +658,47 @@ def settings():
         # 4. Commit standard changes to the database
         db.session.commit()
         flash("School settings updated successfully!", "success")
-         
+        
         # Redirect after POST to prevent resubmission on refresh
         return redirect(url_for('settings'))
 
     # GET request: Render the form
-    # Note: The expected_fees_this_term passed to the template should be converted back to Naira
     expected_fees_naira = float(school.expected_fees_this_term or 0) / 100.0
     return render_template("settings.html", school=school, expected_fees_naira=expected_fees_naira)
 
 # ---------------------------
-# LOGO UPLOAD (DEPRECATED - now handled in settings)
+# LOGO UPLOAD (DEPRECATED - now handled in settings) (CLEANED)
 # ---------------------------
 @app.route("/upload_logo", methods=["POST"])
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def upload_logo():
     school = current_school()
     handle_logo_upload(school)
     return redirect(url_for("dashboard"))
 
 # ---------------------------
-# STUDENTS (List and inline add)
+# STUDENTS (List and inline add) (CLEANED)
 # ---------------------------
 @app.route("/students", methods=["GET", "POST"])
 @login_required
-@trial_required # NEW: Enforce time-based trial restriction
+@trial_required
 def students():
     school = current_school()
-     
+    
     if request.method == "POST":
         student_count = Student.query.filter_by(school_id=school.id).count()
         subscription_endpoint = 'pay_with_paystack_subscription'
-         
+        
         # Student count restriction only prevents POST (adding new students)
-        if school.subscription_expiry < datetime.today().date() and student_count >= app.config['TRIAL_LIMIT']:
-            flash(f"Your subscription has expired. Please renew to add more than {app.config['TRIAL_LIMIT']} students.", "danger")
+        if school.subscription_expiry < datetime.today().date() and student_count >= current_app.config['TRIAL_LIMIT']:
+            flash(f"Your subscription has expired. Please renew to add more than {current_app.config['TRIAL_LIMIT']} students.", "danger")
             return redirect(url_for(subscription_endpoint))
-             
+            
         name = request.form.get("name", "").strip()
         reg_number = request.form.get("reg_number", "").strip()
         student_class = request.form.get("student_class", "").strip()
-         
+        
         if not all([name, reg_number, student_class]):
             flash("All fields are required.", "danger")
         else:
@@ -676,13 +716,13 @@ def students():
                 db.session.commit()
                 flash("Student added successfully.", "success")
         return redirect(url_for("students"))
-         
+        
     students_list = Student.query.filter_by(school_id=school.id).all()
     student_count = len(students_list)
     # Logic for display banner: trial active if time hasn't expired OR student count is below limit.
-    trial_active = school.subscription_expiry >= datetime.today().date() or student_count < app.config['TRIAL_LIMIT']
-     
-    return render_template("students.html", students=students_list, student_count=student_count, trial_limit=app.config['TRIAL_LIMIT'], trial_active=trial_active)
+    trial_active = school.subscription_expiry >= datetime.today().date() or student_count < current_app.config['TRIAL_LIMIT']
+    
+    return render_template("students.html", students=students_list, student_count=student_count, trial_limit=current_app.config['TRIAL_LIMIT'], trial_active=trial_active)
 
 # ---------------------------
 # API ENDPOINTS
@@ -1363,6 +1403,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
