@@ -976,25 +976,23 @@ def generate_receipt(payment_id):
 
     student = payment.student
     
-    # --- LOGGING DEBUG: 1 ---
     logging.info(f"--- Processing Receipt ID: {payment_id} ---")
-    logging.info(f"Student Class: '{student.student_class}'")
-    logging.info(f"School ID: {school.id}")
-
-    # FIX: Fee Structure query modified to look only by class and school ID, 
-    # and the /100.0 conversion is removed to match the data storage pattern.
-    fee_structure = FeeStructure.query.filter_by(
-        school_id=school.id,
-        class_name=student.student_class
+    logging.info(f"Student Class (from Payment): '{student.student_class}'")
+    
+    # FIX: Use .filter() with .ilike() for case-insensitive matching on class_name
+    fee_structure = FeeStructure.query.filter(
+        FeeStructure.school_id == school.id,
+        FeeStructure.class_name.ilike(student.student_class)
     ).first()
     
     # Check if fee structure was found
     if not fee_structure:
-        logging.warning(f"Fee structure NOT FOUND for Class: '{student.student_class}' (School ID: {school.id})")
+        logging.warning(f"Fee structure NOT FOUND using case-insensitive search for Class: '{student.student_class}'")
         expected_amount_naira = 0.0
     else:
+        # Expected amount is assumed to be stored as Naira
         expected_amount_naira = float(fee_structure.expected_amount)
-        logging.info(f"Fee structure FOUND. Expected Amount (Naira): {expected_amount_naira:,.2f}")
+        logging.info(f"Fee structure FOUND. Expected Amount (Naira): {expected_amount_naira:,.2f} from class: '{fee_structure.class_name}'")
 
 
     # Calculate total paid for this term/session (in database value - assumed Naira)
@@ -1009,7 +1007,6 @@ def generate_receipt(payment_id):
     # Calculate outstanding balance
     outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
     
-    # --- LOGGING DEBUG: 2 ---
     logging.info(f"Total Paid (Naira): {total_paid_naira:,.2f}")
     logging.info(f"Outstanding Balance: {outstanding_balance_naira:,.2f}")
     logging.info(f"----------------------------------------")
@@ -1044,10 +1041,10 @@ def download_receipt(payment_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # FIX: Fee Structure query modified to look only by class and school ID.
-    fee_structure = FeeStructure.query.filter_by(
-        school_id=school.id,
-        class_name=student.student_class
+    # FIX: Use .filter() with .ilike() for case-insensitive matching on class_name
+    fee_structure = FeeStructure.query.filter(
+        FeeStructure.school_id == school.id,
+        FeeStructure.class_name.ilike(student.student_class)
     ).first()
 
     # Check if fee structure was found
@@ -1310,6 +1307,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
