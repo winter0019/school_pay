@@ -471,15 +471,7 @@ def internal_server_error(e):
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if request.method == "POST":
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        school = School.query.filter_by(email=email).first()
-        if school and check_password_hash(school.password, password):
-            session["school_id"] = school.id
-            return redirect(url_for("dashboard"))
-        flash("Invalid email or password.", "danger")
-    return render_template("index.html")
+# ... (Keep this function as is)
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -497,7 +489,7 @@ def register():
             
         hashed_pw = generate_password_hash(password)
         
-        # CRITICAL FIX: Give a trial period of exactly 1 day
+        # KEY UPDATE: Give a trial period of exactly 1 day from today
         initial_expiry = datetime.today().date() + timedelta(days=1) 
         
         school = School(
@@ -512,7 +504,6 @@ def register():
         return redirect(url_for("index")) # Redirect to login after successful registration
 
     return render_template("register.html")
-
 @app.route("/logout")
 def logout():
     session.pop("school_id", None)
@@ -575,12 +566,12 @@ def dashboard():
         return redirect(url_for("index"))
 
     # We need to assume a current term and session for "Payments This Term"
+    # These should ideally be set globally or fetched from user input/settings
     current_term, current_session = "Third Term", "2025/2026"
 
     total_students = Student.query.filter_by(school_id=school.id).count()
 
-    # 1. Calculate Payments This Term
-    # Total payments made THIS TERM (stored in Naira)
+    # 1. Calculate Payments This Term (Stored in Naira, converted to Kobo for template)
     payments_this_term_naira = (
         db.session.query(db.func.sum(Payment.amount_paid))
         .join(Student)
@@ -591,18 +582,15 @@ def dashboard():
         )
         .scalar()
     ) or 0
-    
-    # Convert Payments This Term to KOBO for consistency with original template variable `total_payments`
+    # Convert payments from Naira (Float) to Kobo (Integer) for template display
     payments_this_term_kobo = int(float(payments_this_term_naira) * 100)
 
-    # 2. FIX: Calculate Outstanding Balance using the dynamic helper
-    # This result is in Naira.
+    # 2. Calculate Outstanding Balance using the dynamic helper (Result in Naira)
+    # The 'calculate_total_outstanding_dynamic' function provided earlier is critical here.
     total_outstanding_naira = calculate_total_outstanding_dynamic(school)
     
-    # Convert final outstanding balance to KOBO to match original template variable `outstanding_balance`
-    # We use round() to ensure correct integer conversion from float arithmetic.
+    # Convert final outstanding balance to KOBO for template display
     outstanding_balance_kobo = int(round(total_outstanding_naira * 100))
-
 
     # 3. Recent Payments
     recent_payments = (
@@ -613,7 +601,7 @@ def dashboard():
         .all()
     )
 
-    # Subscription status
+    # KEY UPDATE: Check if the subscription is active based on the expiry date
     subscription_active = school.subscription_expiry >= datetime.today().date()
 
     return render_template(
@@ -625,6 +613,7 @@ def dashboard():
         outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
     )
+
 
 # ---------------------------
 # SETTINGS/PROFILE PAGE (CLEANED)
@@ -678,7 +667,7 @@ def upload_logo():
     return redirect(url_for("dashboard"))
 
 # ---------------------------
-# STUDENTS (List and inline add) (CLEANED)
+# STUDENTS (List and inline add)
 # ---------------------------
 @app.route("/students", methods=["GET", "POST"])
 @login_required
@@ -690,7 +679,7 @@ def students():
         student_count = Student.query.filter_by(school_id=school.id).count()
         subscription_endpoint = 'pay_with_paystack_subscription'
         
-        # Student count restriction only prevents POST (adding new students)
+        # KEY UPDATE: Enforce the student count limit after the trial expiry date
         if school.subscription_expiry < datetime.today().date() and student_count >= current_app.config['TRIAL_LIMIT']:
             flash(f"Your subscription has expired. Please renew to add more than {current_app.config['TRIAL_LIMIT']} students.", "danger")
             return redirect(url_for(subscription_endpoint))
@@ -1403,6 +1392,7 @@ if __name__ == "__main__":
         db.create_all()
     # Use 0.0.0.0 for Render compatibility
     app.run(host='0.0.0.0', port=os.environ.get('PORT', 5000), debug=True)
+
 
 
 
