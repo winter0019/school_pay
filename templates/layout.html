@@ -47,8 +47,8 @@
                 
                 <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'students' %}bg-indigo-700{% endif %}">Students</a>
                 
-                <!-- FIX: Changed 'list_payments' to 'get_student_payments' to resolve the BuildError -->
-                <a href="{{ url_for('get_student_payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'get_student_payments' %}bg-indigo-700{% endif %}">Payments</a>
+                <!-- FIXED: Reverted to generic name 'list_payments'. You must now ensure this endpoint exists in app.py without parameters. -->
+                <a href="{{ url_for('list_payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'list_payments' %}bg-indigo-700{% endif %}">Payments</a>
                 
                 <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'add_payment' %}bg-indigo-700{% endif %}">Add Payment</a>
 
