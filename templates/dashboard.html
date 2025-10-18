@@ -1,95 +1,54 @@
 {% extends 'layout.html' %}
 
 {% block title %}Dashboard{% endblock %}
+{% block header_title %}Admin Dashboard{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div class="space-y-8">
 
-  <h1 class="text-3xl font-bold text-gray-800">Dashboard</h1>
-  <p class="text-gray-600">Welcome, {{ school.name }}. Here’s an overview of the school payment system.</p>
+    <h1 class="text-3xl font-extrabold text-gray-900 border-b pb-2">Welcome, {{ school.name }}</h1>
+    
+    {% if not subscription_active %}
+    <div class="flex items-center space-x-3 bg-red-100 border border-red-300 text-red-700 p-4 rounded-xl shadow-md">
+        <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.332 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+        <p class="font-medium">
+            Your **subscription has expired**. Please 
+            <a href="{{ url_for('pay_with_paystack_subscription') }}" class="underline font-bold hover:text-red-900 transition">renew here</a>
+            to restore full service access.
+        </p>
+    </div>
+    {% endif %}
 
-  {% if not subscription_active %}
-    <div class="bg-red-100 text-red-700 p-4 rounded">
-      Your subscription has expired. Please 
-      <a href="{{ url_for('pay_with_paystack_subscription') }}" class="underline">renew here</a>.
-    </div>
-  {% endif %}
-
-    <div class="bg-white shadow-lg rounded-lg p-6">
-    <h2 class="text-xl font-bold text-gray-700 mb-4">School Logo</h2>
-
-    {% if school.logo_path %}
-      <img src="{{ url_for('static', filename='logos/' + school.logo_path.split('/')[-1]) }}"
-           alt="School Logo"
-           class="w-32 h-32 object-contain mb-4 border rounded-lg shadow">
-    {% else %}
-      <p class="text-gray-500 mb-4">No logo uploaded yet.</p>
-    {% endif %}
-
-    <form action="{{ url_for('upload_logo') }}" method="POST" enctype="multipart/form-data" class="flex items-center gap-4">
-      <input type="file" name="logo" accept="image/*" class="border p-2 rounded-md">
-      <button type="submit"
-        class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition">
-        Upload Logo
-      </button>
-    </form>
-  </div>
-
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <div class="bg-white shadow rounded-lg p-6">
-      <h2 class="text-lg font-bold text-gray-700">Total Students</h2>
-      <p class="text-3xl font-extrabold text-indigo-700">{{ total_students or 0 }}</p>
-    </div>
-    <div class="bg-white shadow rounded-lg p-6">
-      <h2 class="text-lg font-bold text-gray-700">Payments This Term</h2>
-      <p class="text-3xl font-extrabold text-green-600">
-        {# FIX: Divide kobo by 100.0 to display Naira #}
-        ₦{{ "{:,.2f}".format((total_payments / 100.0) or 0) }}
-      </p>
-    </div>
-    <div class="bg-white shadow rounded-lg p-6">
-      <h2 class="text-lg font-bold text-gray-700">Outstanding Balance</h2>
-      <p class="text-3xl font-extrabold text-red-600">
-        {# FIX: Divide kobo by 100.0 to display Naira #}
-        ₦{{ "{:,.2f}".format((outstanding_balance / 100.0) or 0) }}
-      </p>
-    </div>
-  </div>
-
-  <div class="bg-white shadow rounded-lg p-6">
-    <h2 class="text-xl font-bold text-gray-700 mb-4">Recent Payments</h2>
-    {% if recent_payments %}
-    <div class="overflow-x-auto">
-      <table class="w-full text-left border-collapse">
-        <thead>
-          <tr class="bg-gray-100">
-            <th class="p-2 border">Student</th>
-            <th class="p-2 border">Date</th>
-            <th class="p-2 border">Amount</th>
-            <th class="p-2 border">Type</th>
-            <th class="p-2 border">Term</th>
-            <th class="p-2 border">Session</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in recent_payments %}
-          <tr class="border-t hover:bg-gray-50">
-            <td class="p-2">{{ p.student.name }}</td>
-            <td class="p-2">{{ p.payment_date.strftime('%Y-%m-%d') if p.payment_date else '' }}</td>
-            {# FIX: Divide kobo by 100.0 to display Naira #}
-            <td class="p-2">₦{{ "{:,.2f}".format((p.amount_paid / 100.0) or 0) }}</td>
-            <td class="p-2">{{ p.payment_type or '' }}</td>
-            <td class="p-2">{{ p.term or '' }}</td>
-            <td class="p-2">{{ p.session or '' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="text-gray-500">No recent payments yet.</p>
-    {% endif %}
-  </div>
-
-</div>
-{% endblock %}
+    <!-- Metric Cards (Key Performance Indicators) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        
+        <!-- Total Students Card -->
+        <div class="bg-white shadow-xl rounded-2xl p-6 border-l-4 border-indigo-500 transform hover:scale-[1.02] transition duration-300">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-600">Total Students</h2>
+                <svg class="w-8 h-8 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20v-2m0 2h2m-4-2H7m4 0h5m4-12H9M3 10h18M3 14h18M4 7h16"></path></svg>
+            </div>
+            <p class="text-5xl font-extrabold text-indigo-700 mt-2">{{ total_students or 0 }}</p>
+        </div>
+        
+        <!-- Payments This Term Card -->
+        <div class="bg-white shadow-xl rounded-2xl p-6 border-l-4 border-green-500 transform hover:scale-[1.02] transition duration-300">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-600">Payments This Term</h2>
+                <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c1.657 0 3 .895 3 2s-1.343 2-3 2-3 .895-3 2 1.343 2 3 2m0-8V6m0 4v4m0 4v2m-6-2h12"></path></svg>
+            </div>
+            <p class="text-5xl font-extrabold text-green-600 mt-2">
+                {# FIX: Divide kobo by 100.0 to display Naira #}
+                ₦{{ "{:,.2f}".format((total_payments / 100.0) or 0) }}
+            </p>
+        </div>
+        
+        <!-- Outstanding Balance Card -->
+        <div class="bg-white shadow-xl rounded-2xl p-6 border-l-4 border-red-500 transform hover:scale-[1.02] transition duration-300">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-600">Outstanding Balance</h2>
+                <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+            <p class="text-5xl font-extrabold text-red-600 mt-2">
+                {# FIX: Divide kobo by 100.0 to display Naira #}
+                ₦{{ "{:,.2f}".
