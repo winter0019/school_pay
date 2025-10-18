@@ -923,6 +923,156 @@ def paystack_callback():
         app.logger.error(f"Paystack Verification Error: {e}")
     
     return redirect(url_for("dashboard"))
+
+
+# ---------------------------
+# PAYMENTS ROUTES (UPDATED FOR FILTERING AND PAGINATION)
+# ---------------------------
+@app.route("/payments")
+@login_required
+@trial_required
+def list_payments():
+    school = current_school()
+    
+    # --- 1. Get Query Parameters from URL ---
+    page = request.args.get('page', 1, type=int)
+    per_page = 10 # Define how many items per page
+    
+    # Filters
+    search = request.args.get('search', '').strip()
+    term = request.args.get('term', '').strip()
+    session_year = request.args.get('session', '').strip()
+
+    # --- 2. Build Base Query ---
+    # Start with all payments belonging to the current school, joining Student to filter
+    query = Payment.query.join(Student).filter(Student.school_id == school.id)
+
+    # --- Apply Filters ---
+    
+    # 2a. Search Filter (by student name or registration number)
+    if search:
+        query = query.filter(
+            db.or_(
+                Student.name.ilike(f"%{search}%"),
+                Student.reg_number.ilike(f"%{search}%")
+            )
+        )
+
+    # 2b. Term Filter
+    if term:
+        query = query.filter(Payment.term == term)
+
+    # 2c. Session Filter
+    if session_year:
+        query = query.filter(Payment.session.ilike(f"%{session_year}%"))
+
+    # --- 3. Apply Ordering and Pagination ---
+    query = query.order_by(Payment.payment_date.desc())
+    
+    # Paginate the final result
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    # --- 4. Render Template ---
+    return render_template(
+        "payments_list.html",
+        payments=pagination.items,
+        pagination=pagination,
+        # Pass the search parameters back to the template for use in pagination links
+        search=search,
+        term=term,
+        session_year=session_year
+    )
+
+@app.route("/add-payment", methods=["GET", "POST"])
+@login_required
+@trial_required # NEW: Enforce time-based trial restriction
+def add_payment():
+    school = current_school()
+    
+    if request.method == "POST":
+        student_id = request.form.get("student_id")
+        
+        if not student_id:
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="No student selected."), 400
+            flash("No student selected.", "danger")
+            return redirect(url_for("add_payment"))
+            
+        # --- Input validation for student_id ---
+        try:
+            student_id = int(student_id)
+        except (ValueError, TypeError):
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="Invalid student ID format."), 400
+            flash("Invalid student ID.", "danger")
+            return redirect(url_for("add_payment"))
+
+        student = db.session.get(Student, student_id)
+        if not student or student.school_id != school.id:
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="Student not found or access denied."), 404
+            flash("Student not found or access denied.", "danger")
+            return redirect(url_for("add_payment"))
+            
+        # --- Core Payment Logic with Error Catching ---
+        try:
+            new_payment = create_new_payment(request.form, student)
+            
+            if new_payment:
+                # SUCCESS RESPONSE FIX: Explicitly return 200 OK
+                if request.accept_mimetypes.accept_json:
+                    return jsonify({
+                        "message": "Payment recorded successfully!",
+                        "student_name": student.name,
+                        "student_class": student.student_class,
+                        "amount_paid": new_payment.amount_paid,
+                        "payment_type": new_payment.payment_type,
+                        "term": new_payment.term,
+                        "session": new_payment.session,
+                        "date": new_payment.payment_date.strftime("%Y-%m-%d %H:%M"),
+                        # Fixed redirect URL to use 'generate_receipt'
+                        "redirect_url": url_for("generate_receipt", payment_id=new_payment.id) 
+                    }), 200 
+                
+                # Standard (non-AJAX) success path
+                flash("Payment added successfully", "success")
+                # Fixed redirect URL to use 'generate_receipt'
+                return redirect(url_for("generate_receipt", payment_id=new_payment.id))
+
+            # If create_new_payment failed but didn't throw an exception (e.g., returned None)
+            if request.accept_mimetypes.accept_json:
+                return jsonify(error="Payment creation failed internally."), 500
+            flash("Payment creation failed. Please check input values.", "danger")
+            return redirect(url_for("add_payment"))
+
+        except Exception as e:
+            # If the database commit *succeeded* but something else failed afterward
+            db.session.rollback()
+            app.logger.error(f"Critical error after payment save in add_payment route: {e}")
+            
+            if request.accept_mimetypes.accept_json:
+                # This 500 response will trigger the client error message
+                return jsonify(error="An unexpected server error occurred after transaction. Check server logs."), 500
+            
+            flash("An unexpected error occurred. Please try again.", "danger")
+            return redirect(url_for("add_payment"))
+
+    # GET Request logic (unchanged)
+    student_to_prefill = None
+    student_id_from_url = request.args.get("student_id")
+    if student_id_from_url:
+        try:
+            student_to_prefill = db.session.get(Student, int(student_id_from_url))
+            if not student_to_prefill or student_to_prefill.school_id != school.id:
+                flash("Access denied or student not found.", "danger")
+                student_to_prefill = None
+        except (ValueError, TypeError):
+            flash("Invalid student ID in URL.", "danger")
+
+    return render_template("add_payment_global.html", student=student_to_prefill)
+
+
+
 # ---------------------------
 # RECIEPT GENERATION (Placeholder, can be fully implemented with ReportLab)
 # ---------------------------
@@ -1113,9 +1263,129 @@ def download_receipt():
         flash("No receipt data found. Please generate a receipt first.", "danger")
         return redirect(url_for("receipt_generator_index"))
 
+# ---------------------------
+# FEE STRUCTURE ROUTES (Create, Read, Update)
+# ---------------------------
+@app.route("/fee-structure", methods=["GET", "POST"])
+@login_required
+@trial_required
+def fee_structure():
+    school = current_school()
+
+    if request.method == "POST":
+        
+        # 🧾 Gather and sanitize fields
+        class_name = request.form.get("class_name", "").strip()
+        term = request.form.get("term", "").strip()
+        session_ = request.form.get("session", "").strip()
+        raw_amount = request.form.get("amount", "").strip()
+
+        app.logger.info(f"[FEE STRUCTURE] Received form data -> "
+                        f"class_name='{class_name}', term='{term}', session='{session_}', amount='{raw_amount}'")
+
+        # 🚫 Validate required fields
+        if not class_name or not term or not session_ or not raw_amount:
+            flash("All fields (Class, Term, Session, Amount) are required.", "danger")
+            return redirect(url_for("fee_structure"))
+
+        # 💰 Clean & convert amount using helper
+        try:
+            expected_amount_kobo, amount_naira = _clean_and_convert_amount(raw_amount)
+            app.logger.info(f"[FEE STRUCTURE] Parsed amount: ₦{amount_naira:,.2f} ({expected_amount_kobo} kobo)")
+        except (ValueError, TypeError) as e:
+            app.logger.error(f"[FEE STRUCTURE] Amount conversion failed: {e} | Raw input: '{raw_amount}'")
+            flash("Invalid amount entered. Please use a numeric value greater than zero.", "danger")
+            return redirect(url_for("fee_structure"))
+
+        # 🔍 Check if a fee structure already exists for this class, term, and session (UPSERT key)
+        existing_fee = FeeStructure.query.filter_by(
+            school_id=school.id,
+            class_name=class_name,
+            term=term,
+            session=session_
+        ).first()
+
+        try:
+            # 🏗️ Update or create the record
+            if existing_fee:
+                existing_fee.expected_amount = expected_amount_kobo
+                db.session.commit()
+                flash(f"Fee structure for {class_name} ({term}, {session_}) updated successfully.", "success")
+                app.logger.info(f"[FEE STRUCTURE] Updated Fee ID {existing_fee.id}: {class_name}, {term}, {session_}")
+            else:
+                new_fee = FeeStructure(
+                    school_id=school.id,
+                    class_name=class_name,
+                    term=term,
+                    session=session_,
+                    expected_amount=expected_amount_kobo,
+                )
+                db.session.add(new_fee)
+                db.session.commit()
+                flash(f"Fee structure for {class_name} ({term}, {session_}) added successfully.", "success")
+                app.logger.info(f"[FEE STRUCTURE] Created new Fee ID {new_fee.id}: {class_name}, {term}, {session_}")
+
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"[FEE STRUCTURE FAILED] Database commit error by user {current_user.id}: {e}")
+            flash("A database error occurred while saving the fee structure.", "danger")
+
+        return redirect(url_for("fee_structure"))
+
+    # 📊 Display all fee structures for this school (GET request)
+    fees = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.id.desc()).all()
+    app.logger.info(f"[FEE STRUCTURE] Displaying {len(fees)} records for school_id={school.id}")
+
+    # NOTE: You need a 'fee_structure.html' template for this line to work.
+    return render_template("fee_structure.html", fees=fees)
+
+@app.route("/delete-fee-structure/<int:id>", methods=["POST"])
+@login_required
+@trial_required
+def delete_fee_structure(id):
+    from app import db, FeeStructure, app
+    from flask import flash, redirect, url_for
+    # current_user is imported in the actual app for logging context
+
+    school = current_school() 
+
+    # 1. Fetch the fee structure, ensuring it belongs to the current school for security.
+    fee_to_delete = FeeStructure.query.filter_by(id=id, school_id=school.id).first()
+
+    if not fee_to_delete:
+        app.logger.warning(
+            f"[DELETE FEE FAILED] User attempted to delete non-existent or unauthorized fee ID {id} for school {school.id}"
+        )
+        flash("Fee structure not found or unauthorized.", "danger")
+    else:
+        try:
+            class_name = fee_to_delete.class_name
+            
+            # 2. Delete the record and commit
+            db.session.delete(fee_to_delete)
+            db.session.commit()
+            
+            # 3. Success feedback and audit log
+            flash(f"Fee structure for class '{class_name}' deleted successfully.", "success")
+            app.logger.info(
+                f"[DELETE FEE SUCCESS] School {school.id} deleted fee structure ID {id} (Class: {class_name})."
+            )
+            
+        except Exception as e:
+            # 4. Error handling and rollback
+            db.session.rollback()
+            app.logger.error(
+                f"[DELETE FEE FAILED] Database error deleting fee ID {id} for school {school.id}: {e}"
+            )
+            flash("An unexpected database error occurred during deletion.", "danger")
+
+    return redirect(url_for("fee_structure"))
+
+
 if __name__ == "__main__":
     with app.app_context():
         # This is where database initialization would typically happen
         # db.create_all()
         pass
     app.run(debug=True)
+
