@@ -815,115 +815,74 @@ def pay_with_paystack_subscription():
         # Check if they are already subscribed
         is_subscribed = school.subscription_expiry >= datetime.today().date()
         
-        # The user's provided code ended here. I'm completing the GET return.
         return render_template(
             "subscription.html",
             school=school,
             subscription_amount=app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'] / 100, # Convert kobo to NGN
             today=datetime.today().date(),
-            public_key=app.config.get('PAYSTACK_PUBLIC_KEY'),
-            is_subscribed=is_subscribed,
+            is_subscribed=is_subscribed
         )
 
-    # If the request is a POST, initialize the transaction.
-    if request.method == "POST":
-        # Ensure we have the necessary keys
-        if not all([app.config.get('PAYSTACK_SECRET_KEY'), app.config.get('PAYSTACK_SUBSCRIPTION_AMOUNT')]):
-            flash("Paystack keys or amount not configured. Cannot process payment.", "danger")
-            return redirect(url_for('settings'))
+    # If the request is a POST, initialize payment.
+    paystack_api_url = "https://api.paystack.co/transaction/initialize"
+    headers = {
+        "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "email": school.email,
+        "amount": app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'],
+        "currency": "NGN",
+        "reference": f"SP-SUB-{datetime.utcnow().timestamp()}",
+        "callback_url": url_for("paystack_callback", _external=True)
+    }
+    
+    try:
+        response = requests.post(paystack_api_url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status()
+        res_data = response.json()
 
-        # Paystack API endpoint for initialization
-        url = "https://api.paystack.co/transaction/initialize"
-        
-        # Data required by Paystack
-        data = {
-            "email": school.email,
-            "amount": app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'], # Must be in kobo
-            # Use the official Paystack callback URL
-            "callback_url": url_for('paystack_callback', _external=True),
-            "metadata": {
-                "custom_fields": [
-                    {"display_name": "School ID", "variable_name": "school_id", "value": school.id}
-                ]
-            }
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}",
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, data=json.dumps(data), timeout=10)
-            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-            
-            result = response.json()
-            
-            if result.get("status") and result["data"].get("authorization_url"):
-                # Redirect the user to Paystack's authorization page
-                return redirect(result["data"]["authorization_url"])
-            else:
-                flash(f"Payment initialization failed: {result.get('message', 'Unknown error')}", "danger")
-                app.logger.error(f"Paystack Init Error: {result}")
-        
-        except requests.exceptions.RequestException as e:
-            flash("Could not connect to the payment gateway.", "danger")
-            app.logger.error(f"Paystack Request Error: {e}")
-        
-        return redirect(url_for("pay_with_paystack_subscription"))
+        if res_data["status"]:
+            # The front end expects a JSON response with redirect_url
+            return jsonify(redirect_url=res_data["data"]["authorization_url"])
+        else:
+            return jsonify(error=res_data["message"]), 400
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Paystack API error during initialization: {e}")
+        return jsonify(error=f"Paystack API error: {e}"), 500
 
-
-@app.route("/paystack-callback")
+@app.route("/paystack/callback", methods=["GET"])
 @login_required
 # NOTE: This route is intentionally NOT wrapped in @trial_required
 def paystack_callback():
-    """
-    Handles the redirect from Paystack after payment attempt and verifies the transaction.
-    """
-    school = current_school()
     reference = request.args.get("reference")
+    school = current_school()
 
     if not reference:
-        flash("Payment reference missing. Payment verification failed.", "danger")
-        return redirect(url_for("dashboard"))
-
-    # Paystack API endpoint for verification
-    url = f"https://api.paystack.co/transaction/verify/{reference}"
-    headers = {
-        "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}",
-    }
+        flash("Invalid payment callback.", "danger")
+        return redirect(url_for("pay_with_paystack_subscription")) 
+    
+    paystack_verify_url = f"https://api.paystack.co/transaction/verify/{reference}"
+    headers = {"Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}"}
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(paystack_verify_url, headers=headers)
         response.raise_for_status()
-        result = response.json()
+        res_data = response.json()
 
-        # Check for success status and amount match
-        if result.get("status") and result["data"]["status"] == "success" and \
-           result["data"]["amount"] == app.config['PAYSTACK_SUBSCRIPTION_AMOUNT']:
-            
-            # Successful payment - update the subscription expiry date
-            # Add 365 days to the current expiry, or to today if already expired
-            base_date = max(school.subscription_expiry, datetime.today().date())
-            new_expiry_date = base_date + timedelta(days=365)
-            
-            school.subscription_expiry = new_expiry_date
+        if res_data["status"] and res_data["data"]["status"] == "success":
+            # Add 1 year to the subscription expiry date
+            school.subscription_expiry = datetime.today().date() + timedelta(days=365)
             db.session.commit()
-            
-            flash("Subscription successfully renewed! You now have full access for one year.", "success")
-            
+            flash("Subscription renewed successfully! You now have full access.", "success")
         else:
-            # Payment failed or verification check did not pass
-            reason = result["data"].get("gateway_response", "Verification failed.")
-            flash(f"Payment was not successful. Reason: {reason}", "danger")
-            app.logger.warning(f"Paystack Verification Fail: Ref {reference}, Status: {result['data']['status']}, Gateway: {reason}")
-            
-    except requests.exceptions.RequestException as e:
-        flash("Failed to verify payment with Paystack due to a network error.", "danger")
-        app.logger.error(f"Paystack Verification Error: {e}")
-    
-    return redirect(url_for("dashboard"))
+            flash("Subscription payment failed or was not verified.", "danger")
 
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Paystack API error during verification: {e}")
+        flash(f"Payment verification failed: {e}", "danger")
+    
+    return redirect(url_for("dashboard")) # Redirect to dashboard after successful payment
 
 # ---------------------------
 # PAYMENTS ROUTES (UPDATED FOR FILTERING AND PAGINATION)
@@ -1388,6 +1347,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
