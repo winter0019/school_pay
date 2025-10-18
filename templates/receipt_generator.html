@@ -2,90 +2,94 @@
 {% block content %}
 
 <div class="container mx-auto p-6">
-    <h1 class="text-3xl font-bold text-gray-800 mb-6">Receipt Generator</h1>
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">Receipt Generator</h1>
 
-    <form method="GET" action="{{ url_for('receipt_generator') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden">
-        <input 
-            type="text" 
-            name="search_query" 
-            placeholder="🔍 Search by name or reg number..." 
-            value="{{ search_query }}"
-            class="flex-grow border-0 p-3 focus:ring focus:ring-indigo-200 focus:outline-none"
-        >
-        <button 
-            type="submit" 
-            class="bg-indigo-600 text-white px-6 font-semibold hover:bg-indigo-700 transition"
-        >
-            Search
-        </button>
-    </form>
+<!-- FIX: Updated endpoint from 'receipt_generator' to 'receipt_generator_index' 
+         to match the expected route name for this page. -->
 
-    {% if students_list %}
-        <p class="text-gray-600 mb-4">
-            Found <span class="font-semibold">{{ students_list|length }}</span> student(s)
-        </p>
 
-        {% for student in students_list %}
-        <div class="bg-white shadow-md p-6 mb-6 rounded-lg hover:shadow-lg transition">
-            <h2 class="text-xl font-semibold text-gray-900 flex items-center justify-between">
-                {{ student.name }} 
-                <span class="text-sm text-gray-500">({{ student.reg_number }})</span>
-            </h2>
-            <p class="text-gray-600 mb-2">Class: {{ student.student_class }}</p>
+    <form method="GET" action="{{ url_for('receipt_generator_index') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden">
+        <input 
+            type="text" 
+            name="search_query" 
+            placeholder="🔍 Search by name or reg number..." 
+            value="{{ search_query }}"
+            class="flex-grow border-0 p-3 focus:ring focus:ring-indigo-200 focus:outline-none"
+        >
+        <button 
+            type="submit" 
+            class="bg-indigo-600 text-white px-6 font-semibold hover:bg-indigo-700 transition"
+        >
+            Search
+        </button>
+    </form>
 
-            <a
-                href="{{ url_for('payments', search=student.reg_number) }}"
-                class="inline-block mb-4 text-indigo-600 text-sm font-medium hover:underline"
-            >
-                📂 View Full Payment History →
-            </a>
+    {% if students_list %}
+        <p class="text-gray-600 mb-4">
+            Found <span class="font-semibold">{{ students_list|length }}</span> student(s)
+        </p>
 
-            {% if student.payments %}
-            <div class="overflow-x-auto">
-                <table class="w-full border border-gray-200 rounded-lg text-sm">
-                    <thead class="bg-gray-100">
-                        <tr>
-                            <th class="p-3 text-left text-gray-700 font-medium">Date</th>
-                            <th class="p-3 text-left text-gray-700 font-medium">Amount</th>
-                            <th class="p-3 text-left text-gray-700 font-medium">Type</th>
-                            <th class="p-3 text-left text-gray-700 font-medium">Term</th>
-                            <th class="p-3 text-left text-gray-700 font-medium">Session</th>
-                            <th class="p-3 text-left text-gray-700 font-medium">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                        {% for p in student.payments %}
-                        <tr class="hover:bg-gray-50 transition">
-                            <td class="p-3">{{ p.payment_date.strftime('%Y-%m-%d') }}</td>
-                            <td class="p-3 font-semibold text-green-700">₦{{ "{:,.2f}".format(p.amount_paid) }}</td>
-                            <td class="p-3">{{ p.payment_type }}</td>
-                            <td class="p-3">{{ p.term }}</td>
-                            <td class="p-3">{{ p.session }}</td>
-                            <td class="p-3">
-                                <a 
-                                    href="{{ url_for('payment_receipt', payment_id=p.id) }}" 
-                                    target="_blank" 
-                                    class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition"
-                                >
-                                    🧾 View Receipt
-                                </a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-                <p class="text-red-500 mt-3 italic">⚠ No payments recorded yet for this student.</p>
-            {% endif %}
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="text-center text-gray-500 mt-12">
-            <p class="text-lg">No students found. Try searching by name or registration number.</p>
-            <p class="mt-2">💡 Tip: Double-check spelling or spacing in your search.</p>
-        </div>
-    {% endif %}
+        {% for student in students_list %}
+        <div class="bg-white shadow-md p-6 mb-6 rounded-lg hover:shadow-lg transition">
+            <h2 class="text-xl font-semibold text-gray-900 flex items-center justify-between">
+                {{ student.name }} 
+                <span class="text-sm text-gray-500">({{ student.reg_number }})</span>
+            </h2>
+            <p class="text-gray-600 mb-2">Class: {{ student.student_class }}</p>
+
+            <a
+                href="{{ url_for('payments', search=student.reg_number) }}"
+                class="inline-block mb-4 text-indigo-600 text-sm font-medium hover:underline"
+            >
+                📂 View Full Payment History →
+            </a>
+
+            {% if student.payments %}
+            <div class="overflow-x-auto">
+                <table class="w-full border border-gray-200 rounded-lg text-sm">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="p-3 text-left text-gray-700 font-medium">Date</th>
+                            <th class="p-3 text-left text-gray-700 font-medium">Amount</th>
+                            <th class="p-3 text-left text-gray-700 font-medium">Type</th>
+                            <th class="p-3 text-left text-gray-700 font-medium">Term</th>
+                            <th class="p-3 text-left text-gray-700 font-medium">Session</th>
+                            <th class="p-3 text-left text-gray-700 font-medium">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for p in student.payments %}
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="p-3">{{ p.payment_date.strftime('%Y-%m-%d') }}</td>
+                            <td class="p-3 font-semibold text-green-700">₦{{ "{:,.2f}".format(p.amount_paid) }}</td>
+                            <td class="p-3">{{ p.payment_type }}</td>
+                            <td class="p-3">{{ p.term }}</td>
+                            <td class="p-3">{{ p.session }}</td>
+                            <td class="p-3">
+                                <a 
+                                    href="{{ url_for('payment_receipt', payment_id=p.id) }}" 
+                                    target="_blank" 
+                                    class="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition"
+                                >
+                                    🧾 View Receipt
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+                <p class="text-red-500 mt-3 italic">⚠ No payments recorded yet for this student.</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="text-center text-gray-500 mt-12">
+            <p class="text-lg">No students found. Try searching by name or registration number.</p>
+            <p class="mt-2">💡 Tip: Double-check spelling or spacing in your search.</p>
+        </div>
+    {% endif %}
 
 </div>
 {% endblock %}
