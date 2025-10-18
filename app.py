@@ -56,7 +56,7 @@ class Config:
     
     PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY")
     PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY")
-    PAYSTACK_SUBSCRIPTION_AMOUNT = 100000 # in kobo, for NGN 1,000
+    PAYSTACK_SUBSCRIPTION_AMOUNT = 1000000 # in kobo, for NGN 1,000
     
     TRIAL_LIMIT = 2 # Student count limit enforced after trial expires
 
@@ -1388,5 +1388,6 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
