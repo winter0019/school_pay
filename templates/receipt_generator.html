@@ -4,16 +4,12 @@
 <div class="container mx-auto p-6">
     <h1 class="text-3xl font-bold text-gray-800 mb-6">Receipt Generator</h1>
 
-<!-- FIX: Updated endpoint from 'receipt_generator' to 'receipt_generator_index' 
-         to match the expected route name for this page. -->
-
-
-    <form method="GET" action="{{ url_for('receipt_generator_index') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden">
+    <form method="GET" action="{{ url_for('receipt_generator_index') }}" class="mb-8 flex shadow-md rounded-lg overflow-hidden border border-gray-300">
         <input 
             type="text" 
             name="search_query" 
             placeholder="🔍 Search by name or reg number..." 
-            value="{{ search_query }}"
+            value="{{ search_query or '' }}"
             class="flex-grow border-0 p-3 focus:ring focus:ring-indigo-200 focus:outline-none"
         >
         <button 
