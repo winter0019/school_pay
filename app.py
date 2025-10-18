@@ -19,7 +19,6 @@ from werkzeug.utils import secure_filename
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.lib.units import cm # Added for easier dimensioning
 
 from dotenv import load_dotenv
 from PIL import Image
@@ -41,10 +40,10 @@ class Config:
         SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_URI.replace(
             "postgres://", "postgresql+psycopg2://", 1
         )
-    SECRET_KEY = os.environ.get("SECRET_KEY", "default-insecure-key-change-me") # Added a default for local dev
-    if SECRET_KEY == "default-insecure-key-change-me":
-        logging.warning("SECRET_KEY is using a default value. Change this for production.")
-        
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    if not SECRET_KEY:
+        # Recommended practice for local dev if .env is missing
+        raise ValueError("SECRET_KEY must be set in environment for security.")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
@@ -55,17 +54,24 @@ class Config:
     UPLOAD_FOLDER = os.path.join("static", "logos")
     ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
     
-    # Placeholder for a live environment. Paystack keys must be set.
     PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY")
     PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY")
     PAYSTACK_SUBSCRIPTION_AMOUNT = 1000000 # in kobo, for NGN 10,000
-
     
-    # Student count limit enforced after trial expires
-    TRIAL_LIMIT = 2 
+    TRIAL_LIMIT = 2 # Student count limit enforced after trial expires
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# In app.py, add this function after db/migrate initialization, before routes
+def get_logo_path(school):
+    """
+    Returns the URL for the school's logo, or None if no logo is set.
+    """
+    if school and school.logo_filename:
+        # Use url_for to generate the public URL for the browser
+        return url_for('static', filename=f'logos/{school.logo_filename}')
+    return None
 
 # Ensure the upload directory exists
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -83,21 +89,19 @@ class School(db.Model):
     name = db.Column(db.String(150), nullable=False, unique=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
-    # subscription_expiry is a Date object (not DateTime)
-    subscription_expiry = db.Column(db.Date, nullable=False) 
+    subscription_expiry = db.Column(db.Date, nullable=False)
     logo_filename = db.Column(db.String(250), nullable=True)
     address = db.Column(db.String(250), nullable=True)
     phone_number = db.Column(db.String(50), nullable=True)
-    # Expected fees are stored in Kobo (Integer)
-    expected_fees_this_term = db.Column(db.Integer, default=0) 
+    expected_fees_this_term = db.Column(db.Integer, default=0)
 
     # Relationship with Student
     students = db.relationship("Student", backref="school", lazy=True)
 
-    # Relationship with FeeStructure
+    # ✅ Relationship with FeeStructure
     fee_structures = db.relationship(
         "FeeStructure",
-        back_populates="school",           
+        back_populates="school",           # Matches FeeStructure.school
         cascade="all, delete-orphan",
         lazy=True
     )
@@ -115,31 +119,28 @@ class Student(db.Model):
 
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    # Amount is stored in Naira (Float)
-    amount_paid = db.Column(db.Float, nullable=False) 
+    amount_paid = db.Column(db.Float, nullable=False) # Stored in Naira (Float)
     payment_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     payment_type = db.Column(db.String(100))
     term = db.Column(db.String(20))
     session = db.Column(db.String(20))
     student_id = db.Column(db.Integer, db.ForeignKey("student.id"), nullable=False)
-    paystack_ref = db.Column(db.String(100), nullable=True) # Added for subscription payments
 
-# FeeStructure model (UPDATED TO INCLUDE TERM AND SESSION)
+# NEW MODEL: FeeStructure (UPDATED TO INCLUDE TERM AND SESSION)
 class FeeStructure(db.Model):
     __tablename__ = "fee_structure"
 
     id = db.Column(db.Integer, primary_key=True)
     class_name = db.Column(db.String(50), nullable=False)
-    term = db.Column(db.String(20), nullable=False)     # Now NON-NULLABLE
-    session = db.Column(db.String(20), nullable=False)    # Now NON-NULLABLE
-    # Expected amount is stored in Kobo (Integer)
-    expected_amount = db.Column(db.Integer, nullable=False, default=0)  
+    term = db.Column(db.String(20), nullable=True)     # Temporarily allow NULL
+    session = db.Column(db.String(20), nullable=True)  # Temporarily allow NULL
+    expected_amount = db.Column(db.Integer, nullable=False, default=0)  # Stored in Kobo (₦1.00 = 100)
     school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
 
-    # Relationship back to School
+    # ✅ Relationship back to School
     school = db.relationship("School", back_populates="fee_structures", lazy=True)
 
-    # Prevent duplicate entries for same class, term, and session within one school
+    # ✅ Prevent duplicate entries for same class, term, and session within one school
     __table_args__ = (
         db.UniqueConstraint(
             "school_id", "class_name", "term", "session",
@@ -147,12 +148,20 @@ class FeeStructure(db.Model):
         ),
     )
 
+    def __repr__(self):
+        term_display = self.term or "N/A"
+        session_display = self.session or "N/A"
+        return f"<FeeStructure {self.class_name} | Term: {term_display} | Session: {session_display}>"
+
+    # Relationship back to the School model (optional but recommended)
+    school = db.relationship("School", back_populates="fee_structures", lazy=True)
+
     # Helper method to format amount neatly for templates
     def formatted_amount(self):
         return f"₦{self.expected_amount / 100:,.2f}"
 
     def __repr__(self):
-        return f"<FeeStructure {self.class_name} | Term: {self.term} | Session: {self.session}>"
+        return f"<FeeStructure {self.class_name} ({self.term or 'N/A'}, {self.session or 'N/A'}) - ₦{self.expected_amount / 100:.2f}>"
 
 # ---------------------------
 # HELPERS
@@ -179,7 +188,6 @@ def login_required(f):
 def trial_required(f):
     """
     DECORATOR: Checks if the user's subscription (time-based) has expired.
-    Allows access to payment-related endpoints even when expired.
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -190,11 +198,10 @@ def trial_required(f):
         
         # Check if the subscription_expiry date is in the past
         if school and (school.subscription_expiry is None or school.subscription_expiry < now):
-            # Define endpoints that MUST be accessible even when expired
+            # Exempt payment/auth/receipt endpoints from restriction
             unprotected_endpoints = [
-                subscription_endpoint, 'paystack_callback', 'logout',  
-                'index', 'register', 'receipt_generator_index', 'generate_receipt', 'download_receipt',
-                'student_details' # Allow viewing of details to select a payment for receipt
+                subscription_endpoint, 'paystack_callback', 'logout', 
+                'index', 'register', 'receipt_generator_index', 'generate_receipt', 'download_receipt'
             ]
             
             if request.endpoint not in unprotected_endpoints:
@@ -211,15 +218,17 @@ def allowed_file(filename):
 def get_logo_path(school):
     """Returns the URL for the school's logo, or None for template use."""
     if school and school.logo_filename:
+        # Construct the local path to verify existence before creating a URL
         file_path = os.path.join(app.config["UPLOAD_FOLDER"], school.logo_filename)
         if os.path.exists(file_path):
+            # Return relative URL for browser/template use
             return url_for('static', filename=f'logos/{school.logo_filename}')
     return None
 
 def get_logo_local_path(school):
     """
-    Returns the ABSOLUTE local file path for the logo, or None.
-    Required by ReportLab for PDF generation.
+    NEW HELPER: Returns the ABSOLUTE local file path for the logo, or None.
+    This is required by ReportLab for PDF generation.
     """
     if school and school.logo_filename:
         # Construct the ABSOLUTE path
@@ -231,8 +240,8 @@ def get_logo_local_path(school):
 
 def get_expected_fee(school_id, student_class, term, session):
     """
-    Retrieves the expected fee amount from FeeStructure. 
-    Returns amount in Naira (Float).
+    NEW HELPER: Retrieves the expected fee amount based on class, term, and session 
+    from FeeStructure. Converts amount from Kobo/Cents (Integer) to Naira (Float).
     """
     fee_record = db.session.execute(
         db.select(FeeStructure.expected_amount).filter_by(
@@ -243,14 +252,14 @@ def get_expected_fee(school_id, student_class, term, session):
         )
     ).scalar_one_or_none()
     
-    # expected_amount is stored as Integer (Kobo) and must be divided by 100 for Naira (Float)
+    # Assumption: expected_amount is stored as Integer (Kobo) and must be divided by 100 for Naira (Float)
     if fee_record is not None:
         return fee_record / 100.0
     return 0.0
 
 def get_total_paid_for_period(student_id, term, session):
     """
-    Calculates the total amount paid by a student for a specific term and session.
+    NEW HELPER: Calculates the total amount paid by a student for a specific term and session.
     Returns amount in Naira (Float).
     """
     total = db.session.execute(
@@ -311,8 +320,7 @@ def create_new_payment(form_data, student):
     """Creates a new Payment record and commits it to the database."""
     try:
         # Amount expected to be in Naira (or primary currency unit)
-        # Use get float to handle both 'amount' (from Paystack) and 'amount_paid' (from manual form)
-        amount = float(form_data.get("amount") or form_data.get("amount_paid", 0.0))
+        amount = float(form_data.get("amount") or form_data.get("amount_paid"))
         if amount <= 0:
             flash("Amount must be greater than zero.", "danger")
             return None
@@ -322,7 +330,7 @@ def create_new_payment(form_data, student):
     
     term = form_data.get("term", "").strip()
     session_year = form_data.get("session", "").strip()
-    payment_type = form_data.get("payment_type", "Manual").strip()
+    payment_type = form_data.get("payment_type", "").strip()
     
     if not all([amount, term, session_year, payment_type]):
         flash("All payment fields are required.", "danger")
@@ -343,7 +351,7 @@ def create_new_payment(form_data, student):
 def _clean_and_convert_amount(raw_amount):
     """
     Cleans a user-input currency string (like '₦50,000' or '50.000')
-    and converts it to kobo (int) and naira (float).
+    and converts it to naira (float) and kobo (int).
 
     Returns:
         (expected_amount_kobo, amount_naira)
@@ -354,13 +362,13 @@ def _clean_and_convert_amount(raw_amount):
         raise ValueError("Amount is empty")
 
     # Remove all characters except digits and dot
-    cleaned = re.sub(r"[^\d.]", "", str(raw_amount))
+    cleaned = re.sub(r"[^\d.]", "", raw_amount)
     if not cleaned:
         raise ValueError("Amount empty after cleaning")
 
     try:
-        # Convert to float (handles comma separation if cleaned correctly)
-        amount_naira = float(cleaned)
+        # Convert to float (handles both '50.000' and '50,000')
+        amount_naira = float(cleaned.replace(",", ""))
     except ValueError:
         raise ValueError(f"Invalid number format: {raw_amount}")
 
@@ -381,7 +389,8 @@ def calculate_total_outstanding_dynamic(school):
     students = Student.query.filter_by(school_id=school.id).all()
     
     for student in students:
-        # 1. Get ALL Expected Fees for this student's class
+        # 1. Get ALL Expected Fees for this student's class (case-insensitive fix)
+        # Note: We look up all fee structures to get the total expected fees for the life of the student/class
         fee_structures = FeeStructure.query.filter(
             FeeStructure.school_id == school.id,
             FeeStructure.class_name.ilike(student.student_class)
@@ -401,172 +410,12 @@ def calculate_total_outstanding_dynamic(school):
         # 3. Calculate individual outstanding (Only accumulate positive balances)
         outstanding_naira = total_expected_naira - total_paid_naira
         
-        # Only add to total outstanding if the balance is positive (they owe money)
         if outstanding_naira > 0:
             total_outstanding_naira += outstanding_naira
 
     return total_outstanding_naira
 
-def generate_pdf_receipt(payment_id):
-    """
-    Generates a PDF receipt for a specific payment using ReportLab.
-    Returns a BytesIO buffer containing the PDF data.
-    """
-    payment = db.session.get(Payment, payment_id)
-    if not payment:
-        return None
 
-    student = payment.student
-    school = student.school
-    
-    buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    
-    # --- Settings ---
-    TITLE_FONT = 18
-    HEADER_FONT = 12
-    BODY_FONT = 10
-    MARGIN = 50
-    LINE_HEIGHT = 16
-    
-    # --- Header (School Info & Logo) ---
-    y_position = height - MARGIN
-    
-    # Logo
-    logo_path = get_logo_local_path(school)
-    if logo_path:
-        # Draw the logo, resized to fit a small area (e.g., 50x50 units)
-        p.drawImage(logo_path, MARGIN, y_position - 50, width=50, height=50, preserveAspectRatio=True, mask='auto')
-
-    # School Name (Centered)
-    p.setFont("Helvetica-Bold", TITLE_FONT)
-    p.drawCentredString(width / 2, y_position, f"{school.name.upper()} OFFICIAL RECEIPT")
-    y_position -= TITLE_FONT + 10
-
-    # School Contact Info (Aligned Right)
-    p.setFont("Helvetica", BODY_FONT)
-    
-    info_lines = [
-        f"Address: {school.address or 'N/A'}",
-        f"Phone: {school.phone_number or 'N/A'}",
-        f"Email: {school.email}"
-    ]
-    
-    for line in info_lines:
-        p.drawRightString(width - MARGIN, y_position, line)
-        y_position -= LINE_HEIGHT
-
-    # Line separator
-    y_position -= 10
-    p.line(MARGIN, y_position, width - MARGIN, y_position)
-    y_position -= 20
-    
-    # --- Receipt Details ---
-    # Top Left (Receipt Info)
-    p.setFont("Helvetica-Bold", HEADER_FONT)
-    p.drawString(MARGIN, y_position, "Receipt Details")
-    y_position -= LINE_HEIGHT * 1.5
-    
-    p.setFont("Helvetica", BODY_FONT)
-    receipt_data = [
-        ("Receipt ID:", str(payment.id)),
-        ("Payment Date:", payment.payment_date.strftime("%d-%b-%Y %H:%M")),
-        ("Reference/Type:", payment.payment_type),
-        ("Term/Session:", f"{payment.term} / {payment.session}"),
-    ]
-    
-    start_y = y_position
-    for label, value in receipt_data:
-        p.setFont("Helvetica-Bold", BODY_FONT)
-        p.drawString(MARGIN, start_y, label)
-        p.setFont("Helvetica", BODY_FONT)
-        p.drawString(MARGIN + 120, start_y, value)
-        start_y -= LINE_HEIGHT
-    
-    # --- Student Details ---
-    start_y = y_position
-    p.setFont("Helvetica-Bold", HEADER_FONT)
-    p.drawString(width / 2, start_y + LINE_HEIGHT * 1.5, "Student Details")
-    start_y -= LINE_HEIGHT * 1.5
-    
-    p.setFont("Helvetica", BODY_FONT)
-    student_data = [
-        ("Student Name:", student.name),
-        ("Registration No:", student.reg_number),
-        ("Class:", student.student_class),
-    ]
-
-    for label, value in student_data:
-        p.setFont("Helvetica-Bold", BODY_FONT)
-        p.drawString(width / 2, start_y, label)
-        p.setFont("Helvetica", BODY_FONT)
-        p.drawString(width / 2 + 100, start_y, value)
-        start_y -= LINE_HEIGHT
-    
-    y_position = start_y - 20
-    
-    # --- Financial Summary (Table) ---
-    p.line(MARGIN, y_position, width - MARGIN, y_position)
-    y_position -= 10
-    
-    # Calculate balance details for the payment's term/session
-    expected_fee = get_expected_fee(school.id, student.student_class, payment.term, payment.session)
-    total_paid = get_total_paid_for_period(student.id, payment.term, payment.session)
-    balance = max(0.0, expected_fee - total_paid)
-
-    p.setFont("Helvetica-Bold", HEADER_FONT)
-    p.drawString(MARGIN, y_position, "FINANCIAL SUMMARY")
-    y_position -= 20
-
-    # Table Headers
-    col_x = [MARGIN, width / 2, width - MARGIN - 100, width - MARGIN]
-    p.setFont("Helvetica-Bold", BODY_FONT)
-    p.drawString(col_x[0], y_position, "Description")
-    p.drawRightString(col_x[3], y_position, "Amount (₦)")
-    y_position -= LINE_HEIGHT
-    
-    # Amount Paid (Highlighting the current payment)
-    p.setFont("Helvetica", BODY_FONT)
-    p.drawString(col_x[0], y_position, "Fee Payment")
-    p.drawRightString(col_x[3], y_position, f"{payment.amount_paid:,.2f}")
-    y_position -= LINE_HEIGHT
-
-    # Separator
-    y_position -= 5
-    p.line(MARGIN + 350, y_position, width - MARGIN, y_position)
-    y_position -= 15
-    
-    # Summary Rows
-    summary_rows = [
-        ("Expected Fee:", expected_fee),
-        ("Total Paid (Term/Session):", total_paid),
-        ("Current Balance Due:", balance),
-    ]
-
-    p.setFont("Helvetica-Bold", BODY_FONT)
-    for label, value in summary_rows:
-        # Use different color for outstanding balance
-        if "Balance Due" in label and value > 0:
-            p.setFillColor(colors.red)
-        elif "Balance Due" in label and value == 0:
-            p.setFillColor(colors.green)
-        
-        p.drawString(col_x[0], y_position, label)
-        p.drawRightString(col_x[3], y_position, f"{value:,.2f}")
-        p.setFillColor(colors.black) # Reset color
-        y_position -= LINE_HEIGHT
-        
-    # --- Footer ---
-    y_position -= 40
-    p.setFont("Helvetica-Oblique", BODY_FONT)
-    p.drawCentredString(width / 2, MARGIN + 20, "Thank you for your prompt payment.")
-    p.drawRightString(width - MARGIN, MARGIN, "Authorized Signature")
-    
-    p.showPage()
-    p.save()
-    buffer.seek(0)
-    return buffer
 
 # ---------------------------
 # TEMPLATE FILTERS (for display)
@@ -604,29 +453,28 @@ def internal_server_error(e):
     Handles internal server errors (500) and renders the 500.html template.
     """
     app.logger.error(f"Internal Server Error: {e}")
-    # Note: Assuming '500.html' exists. Providing a basic message here for completeness.
-    return render_template('500.html', error=e), 500
+    # Assume you have a 500.html template
+    return render_template('500.html'), 500
 
 # ---------------------------
 # AUTH
 # ---------------------------
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if current_school():
-        return redirect(url_for("dashboard"))
-
+    """Handles school login."""
     if request.method == "POST":
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
         school = School.query.filter_by(email=email).first()
-
+        
         if school and check_password_hash(school.password, password):
             session["school_id"] = school.id
-            flash("Login successful!", "success")
+            flash(f"Welcome back, {school.name}!", "success")
             return redirect(url_for("dashboard"))
         else:
             flash("Invalid email or password.", "danger")
             
+    # NOTE: Assuming you have an 'index.html' template for the login form.
     return render_template("index.html")
 
 @app.route("/register", methods=["GET", "POST"])
@@ -635,10 +483,8 @@ def register():
         name = request.form.get("school_name", "").strip()
         email = request.form.get("email", "").strip()
         password = request.form.get("password", "")
-        
-        # Check for existing school by email OR name
         if School.query.filter((School.email == email) | (School.name == name)).first():
-            flash("School name or email already registered!", "danger")
+            flash("School already exists!", "danger")
             return redirect(url_for("register"))
             
         if len(password) < 8:
@@ -669,8 +515,48 @@ def logout():
     flash("Logged out.", "info")
     return redirect(url_for("index"))
 
+# --- HELPER FUNCTION: DYNAMIC OUTSTANDING CALCULATION ---
+# This function is necessary to calculate the outstanding balance by comparing 
+# the Kobo-based FeeStructure amounts with the Naira-based Payment amounts.
+def calculate_total_outstanding_dynamic(school):
+    """
+    Calculates the total outstanding balance across all students.
+    
+    Dynamically sums all expected fees (Kobo -> Naira) and subtracts all total payments (Naira).
+    Returns the result in Naira (float).
+    """
+    # Assuming School, Student, Payment, FeeStructure models and db are globally available.
+    total_outstanding_naira = 0.0
+    students = Student.query.filter_by(school_id=school.id).all()
+    
+    for student in students:
+        # 1. Get ALL Expected Fees for this student's class (case-insensitive fix)
+        fee_structures = FeeStructure.query.filter(
+            FeeStructure.school_id == school.id,
+            FeeStructure.class_name.ilike(student.student_class)
+        ).all()
+        
+        total_expected_naira = 0.0
+        for fee in fee_structures:
+            # Expected Fee is stored in KOBO, so divide by 100.0 to get Naira
+            total_expected_naira += float(fee.expected_amount) / 100.0
+
+        # 2. Get ALL Payments made by this student (Payments stored in Naira)
+        total_paid_naira = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+            Payment.student_id == student.id
+        ).scalar() or 0
+        total_paid_naira = float(total_paid_naira)
+        
+        # 3. Calculate individual outstanding (Only accumulate positive balances)
+        outstanding_naira = total_expected_naira - total_paid_naira
+        
+        if outstanding_naira > 0:
+            total_outstanding_naira += outstanding_naira
+
+    return total_outstanding_naira
+
 # ---------------------------
-# DASHBOARD
+# DASHBOARD (CLEANED AND FIXED)
 # ---------------------------
 @app.route("/dashboard")
 @login_required
@@ -681,12 +567,13 @@ def dashboard():
         flash("No school record found. Please log in again.", "danger")
         return redirect(url_for("index"))
 
-    # Placeholder for current term and session (should be configurable in a real app)
+    # We need to assume a current term and session for "Payments This Term"
+    # These should ideally be set globally or fetched from user input/settings
     current_term, current_session = "Third Term", "2025/2026"
 
     total_students = Student.query.filter_by(school_id=school.id).count()
 
-    # 1. Calculate Payments This Term
+    # 1. Calculate Payments This Term (Stored in Naira, converted to Kobo for template)
     payments_this_term_naira = (
         db.session.query(db.func.sum(Payment.amount_paid))
         .join(Student)
@@ -700,8 +587,10 @@ def dashboard():
     # Convert payments from Naira (Float) to Kobo (Integer) for template display
     payments_this_term_kobo = int(float(payments_this_term_naira) * 100)
 
-    # 2. Calculate Outstanding Balance
+    # 2. Calculate Outstanding Balance using the dynamic helper (Result in Naira)
+    # The 'calculate_total_outstanding_dynamic' function provided earlier is critical here.
     total_outstanding_naira = calculate_total_outstanding_dynamic(school)
+    
     # Convert final outstanding balance to KOBO for template display
     outstanding_balance_kobo = int(round(total_outstanding_naira * 100))
 
@@ -725,13 +614,11 @@ def dashboard():
         total_payments=payments_this_term_kobo, 
         outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
-        current_term=current_term, # Pass placeholder for display
-        current_session=current_session # Pass placeholder for display
     )
 
 
 # ---------------------------
-# SETTINGS/PROFILE PAGE
+# SETTINGS/PROFILE PAGE (CLEANED)
 # ---------------------------
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
@@ -748,9 +635,7 @@ def settings():
         
         # 2. Process Expected Total Fees 
         try:
-            # Expected fee input is in Naira
-            expected_naira = float(request.form.get('expected_fees_this_term') or 0.0) 
-            
+            expected_naira = float(request.form.get('expected_fees_this_term', 0))
             # Rounding to prevent floating point errors before converting to int for kobo
             school.expected_fees_this_term = int(round(expected_naira * 100))
         except ValueError:
@@ -759,9 +644,7 @@ def settings():
 
         # 3. Handle file upload (Logo)
         if 'logo' in request.files and request.files['logo'].filename != '':
-            if not handle_logo_upload(school):
-                 # If logo upload failed, stop and return
-                 return redirect(url_for('settings'))
+            handle_logo_upload(school) # Use the enhanced helper function
 
         # 4. Commit standard changes to the database
         db.session.commit()
@@ -771,9 +654,19 @@ def settings():
         return redirect(url_for('settings'))
 
     # GET request: Render the form
-    # Convert stored Kobo back to Naira for display
     expected_fees_naira = float(school.expected_fees_this_term or 0) / 100.0
     return render_template("settings.html", school=school, expected_fees_naira=expected_fees_naira)
+
+# ---------------------------
+# LOGO UPLOAD (DEPRECATED - now handled in settings) (CLEANED)
+# ---------------------------
+@app.route("/upload_logo", methods=["POST"])
+@login_required
+@trial_required
+def upload_logo():
+    school = current_school()
+    handle_logo_upload(school)
+    return redirect(url_for("dashboard"))
 
 # ---------------------------
 # STUDENTS (List and inline add)
@@ -820,131 +713,14 @@ def students():
     # Logic for display banner: trial active if time hasn't expired OR student count is below limit.
     trial_active = school.subscription_expiry >= datetime.today().date() or student_count < current_app.config['TRIAL_LIMIT']
     
-    return render_template("students.html", 
-        students=students_list, 
-        student_count=student_count, 
-        trial_limit=current_app.config['TRIAL_LIMIT'], 
-        trial_active=trial_active
-    )
-
-@app.route("/student/<int:student_id>", methods=["GET", "POST"])
-@login_required
-@trial_required
-def student_details(student_id):
-    school = current_school()
-    student = db.session.get(Student, student_id)
-    
-    if not student or student.school_id != school.id:
-        flash("Student not found or access denied.", "danger")
-        return redirect(url_for("students"))
-    
-    # Placeholder for current context (should come from user/settings in a real app)
-    current_term = request.args.get("term", "Third Term")
-    current_session = request.args.get("session", "2025/2026")
-
-    # Handle New Payment Submission
-    if request.method == "POST":
-        payment = create_new_payment(request.form, student)
-        if payment:
-            flash(f"Payment of ₦{payment.amount_paid:,.2f} recorded successfully.", "success")
-        return redirect(url_for("student_details", student_id=student.id, term=current_term, session=current_session))
-
-    # GET Request Logic
-    
-    # 1. Financial Summary for the selected Term/Session
-    expected_fee_naira = get_expected_fee(school.id, student.student_class, current_term, current_session)
-    total_paid_naira = get_total_paid_for_period(student.id, current_term, current_session)
-    
-    # Only show positive outstanding balance
-    outstanding_naira = max(0.0, expected_fee_naira - total_paid_naira)
-    
-    # 2. Payments made for this specific Term/Session
-    term_payments = Payment.query.filter_by(
-        student_id=student.id,
-        term=current_term,
-        session=current_session
-    ).order_by(Payment.payment_date.desc()).all()
-
-    # 3. All distinct terms and sessions for dropdowns (for future features)
-    # In a real app, you would pre-define these. Here we fetch unique ones.
-    all_sessions = db.session.query(Payment.session).distinct().all()
-    all_terms = db.session.query(Payment.term).distinct().all()
-    
-    return render_template(
-        "student_details.html",
-        student=student,
-        current_term=current_term,
-        current_session=current_session,
-        expected_fee=expected_fee_naira,
-        total_paid=total_paid_naira,
-        outstanding=outstanding_naira,
-        term_payments=term_payments,
-        all_sessions=[s[0] for s in all_sessions if s[0]],
-        all_terms=[t[0] for t in all_terms if t[0]]
-    )
-
-# ---------------------------
-# FEE STRUCTURE MANAGEMENT
-# ---------------------------
-@app.route("/fee-structure", methods=["GET", "POST"])
-@login_required
-@trial_required
-def fee_structure_management():
-    school = current_school()
-    
-    if request.method == "POST":
-        class_name = request.form.get("class_name", "").strip()
-        term = request.form.get("term", "").strip()
-        session_year = request.form.get("session", "").strip()
-        raw_amount = request.form.get("expected_amount", "")
-        
-        if not all([class_name, term, session_year, raw_amount]):
-            flash("All fields are required.", "danger")
-            return redirect(url_for("fee_structure_management"))
-            
-        try:
-            expected_amount_kobo, _ = _clean_and_convert_amount(raw_amount)
-        except ValueError as e:
-            flash(f"Invalid amount entered: {e}", "danger")
-            return redirect(url_for("fee_structure_management"))
-
-        # Check if record exists (for update)
-        fee_record = FeeStructure.query.filter_by(
-            school_id=school.id,
-            class_name=class_name,
-            term=term,
-            session=session_year
-        ).first()
-
-        if fee_record:
-            # Update existing record
-            fee_record.expected_amount = expected_amount_kobo
-            flash(f"Fee structure for {class_name} ({term} {session_year}) updated successfully.", "success")
-        else:
-            # Create new record
-            new_fee = FeeStructure(
-                school_id=school.id,
-                class_name=class_name,
-                term=term,
-                session=session_year,
-                expected_amount=expected_amount_kobo
-            )
-            db.session.add(new_fee)
-            flash(f"Fee structure for {class_name} ({term} {session_year}) added successfully.", "success")
-
-        db.session.commit()
-        return redirect(url_for("fee_structure_management"))
-        
-    # GET request
-    fees = FeeStructure.query.filter_by(school_id=school.id).order_by(FeeStructure.class_name, FeeStructure.session, FeeStructure.term).all()
-    return render_template("fee_structure.html", fees=fees)
+    return render_template("students.html", students=students_list, student_count=student_count, trial_limit=current_app.config['TRIAL_LIMIT'], trial_active=trial_active)
 
 # ---------------------------
 # API ENDPOINTS
 # ---------------------------
 @app.route("/search-students", methods=["GET"])
 @login_required
-@trial_required 
+@trial_required # NEW: Enforce time-based trial restriction
 def search_students():
     school = current_school()
     query = request.args.get("q", "").strip()
@@ -962,7 +738,7 @@ def search_students():
 
 @app.route("/student-financials", methods=["GET"])
 @login_required
-@trial_required 
+@trial_required # NEW: Enforce time-based trial restriction
 def student_financials():
     student_id = request.args.get("student_id", type=int)
     term = request.args.get("term", "").strip()
@@ -972,19 +748,32 @@ def student_financials():
     if not student or student.school_id != school.id:
         return jsonify(error="Student not found or access denied."), 404
     
-    # 1. Get expected fee (in Naira)
-    expected_amount_naira = get_expected_fee(school.id, student.student_class, term, session_year)
+    # 1. Get expected fee from FeeStructure (in kobo/cents)
+    fee_structure = FeeStructure.query.filter_by(
+        school_id=school.id,
+        class_name=student.student_class
+    ).first()
+    expected_amount_kobo = fee_structure.expected_amount if fee_structure else 0
     
-    # 2. Calculate total paid for this term/session (in Naira)
-    total_paid_naira = get_total_paid_for_period(student.id, term, session_year)
+    # 2. Calculate total paid for this term/session (Payment.amount_paid is Naira/Primary Currency)
+    total_paid_naira_query = db.session.query(db.func.sum(Payment.amount_paid)).filter_by(
+        student_id=student.id,
+        term=term,
+        session=session_year
+    ).scalar()
+    total_paid_naira = total_paid_naira_query or 0.0
+    total_paid_kobo = int(total_paid_naira * 100)
     
-    # 3. Calculate outstanding (in Naira)
-    outstanding_naira = max(0.0, expected_amount_naira - total_paid_naira)
+    # 3. Calculate outstanding (in kobo/cents)
+    outstanding_kobo = expected_amount_kobo - total_paid_kobo
+    outstanding_kobo = max(0, outstanding_kobo)
     
+    # Convert back to Naira for client-side display in API response
     return jsonify({
-        "total_fee": expected_amount_naira, 
+        # NOTE: Returning kobo/100 for client display in Naira
+        "total_fee": expected_amount_kobo / 100.0, 
         "total_paid": total_paid_naira,
-        "outstanding": outstanding_naira 
+        "outstanding": outstanding_kobo / 100.0 
     })
 
 @app.route("/student/<int:student_id>/payments", methods=["GET"])
@@ -996,6 +785,7 @@ def get_student_payments(student_id):
     student = db.session.get(Student, student_id)
     
     if not student or student.school_id != school.id:
+        # Return an empty array instead of a 404 error if student is not found or access denied
         app.logger.warning(f"Access denied for student ID: {student_id} or student not found.")
         return jsonify(payments=[]), 200
 
@@ -1003,8 +793,8 @@ def get_student_payments(student_id):
     
     payments_data = [{
         "id": p.id,
-        "amount_paid": p.amount_paid, # Already in Naira (float)
-        "date": p.payment_date.isoformat(), 
+        "amount_paid": p.amount_paid,
+        "date": p.payment_date.isoformat(), # Use ISO format for JS compatibility
         "term": p.term,
         "session": p.session
     } for p in payments]
@@ -1025,160 +815,307 @@ def pay_with_paystack_subscription():
         # Check if they are already subscribed
         is_subscribed = school.subscription_expiry >= datetime.today().date()
         
+        # The user's provided code ended here. I'm completing the GET return.
         return render_template(
             "subscription.html",
             school=school,
             subscription_amount=app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'] / 100, # Convert kobo to NGN
             today=datetime.today().date(),
+            public_key=app.config.get('PAYSTACK_PUBLIC_KEY'),
             is_subscribed=is_subscribed,
-            public_key=app.config['PAYSTACK_PUBLIC_KEY'] # Pass public key for JS initialization
         )
-    
-    # If the request is a POST (initiated by the user clicking the Paystack button)
+
+    # If the request is a POST, initialize the transaction.
     if request.method == "POST":
-        # This is where you would traditionally generate a unique reference and initiate payment
-        # However, for Paystack inline, the JS handles the initiation. 
-        # We redirect back to the GET page to ensure the public key is loaded
-        # The actual work happens in the callback.
-        return redirect(url_for('pay_with_paystack_subscription'))
+        # Ensure we have the necessary keys
+        if not all([app.config.get('PAYSTACK_SECRET_KEY'), app.config.get('PAYSTACK_SUBSCRIPTION_AMOUNT')]):
+            flash("Paystack keys or amount not configured. Cannot process payment.", "danger")
+            return redirect(url_for('settings'))
+
+        # Paystack API endpoint for initialization
+        url = "https://api.paystack.co/transaction/initialize"
+        
+        # Data required by Paystack
+        data = {
+            "email": school.email,
+            "amount": app.config['PAYSTACK_SUBSCRIPTION_AMOUNT'], # Must be in kobo
+            # Use the official Paystack callback URL
+            "callback_url": url_for('paystack_callback', _external=True),
+            "metadata": {
+                "custom_fields": [
+                    {"display_name": "School ID", "variable_name": "school_id", "value": school.id}
+                ]
+            }
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}",
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=json.dumps(data), timeout=10)
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            
+            result = response.json()
+            
+            if result.get("status") and result["data"].get("authorization_url"):
+                # Redirect the user to Paystack's authorization page
+                return redirect(result["data"]["authorization_url"])
+            else:
+                flash(f"Payment initialization failed: {result.get('message', 'Unknown error')}", "danger")
+                app.logger.error(f"Paystack Init Error: {result}")
+        
+        except requests.exceptions.RequestException as e:
+            flash("Could not connect to the payment gateway.", "danger")
+            app.logger.error(f"Paystack Request Error: {e}")
+        
+        return redirect(url_for("pay_with_paystack_subscription"))
+
 
 @app.route("/paystack-callback")
 @login_required
+# NOTE: This route is intentionally NOT wrapped in @trial_required
 def paystack_callback():
+    """
+    Handles the redirect from Paystack after payment attempt and verifies the transaction.
+    """
     school = current_school()
     reference = request.args.get("reference")
-    
-    if not reference:
-        flash("Payment reference missing. Please try again.", "danger")
-        return redirect(url_for("pay_with_paystack_subscription"))
 
-    # Verify the transaction with Paystack API
+    if not reference:
+        flash("Payment reference missing. Payment verification failed.", "danger")
+        return redirect(url_for("dashboard"))
+
+    # Paystack API endpoint for verification
     url = f"https://api.paystack.co/transaction/verify/{reference}"
     headers = {
-        "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}"
+        "Authorization": f"Bearer {app.config['PAYSTACK_SECRET_KEY']}",
     }
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
-        verification_data = response.json()
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Paystack verification failed for reference {reference}: {e}")
-        flash("Payment verification failed due to network error. Contact support.", "danger")
-        return redirect(url_for("pay_with_paystack_subscription"))
+        response.raise_for_status()
+        result = response.json()
 
-    if verification_data.get("status") and verification_data["data"]["status"] == "success":
-        # Ensure the amount matches the expected subscription amount
-        paid_amount_kobo = verification_data["data"]["amount"] # Amount is in Kobo
-        expected_amount_kobo = app.config['PAYSTACK_SUBSCRIPTION_AMOUNT']
-
-        if paid_amount_kobo >= expected_amount_kobo:
-            # Subscription successful! Extend the expiry date by one year (365 days)
-            # Find the new start date: either today, or the day after the old expiry
-            current_expiry = school.subscription_expiry
-            today = datetime.today().date()
+        # Check for success status and amount match
+        if result.get("status") and result["data"]["status"] == "success" and \
+           result["data"]["amount"] == app.config['PAYSTACK_SUBSCRIPTION_AMOUNT']:
             
-            if current_expiry and current_expiry > today:
-                # Subscription is still active, extend from the expiry date
-                new_start_date = current_expiry + timedelta(days=1)
-            else:
-                # Subscription expired or brand new, start from today
-                new_start_date = today
-
-            new_expiry_date = new_start_date + timedelta(days=365)
+            # Successful payment - update the subscription expiry date
+            # Add 365 days to the current expiry, or to today if already expired
+            base_date = max(school.subscription_expiry, datetime.today().date())
+            new_expiry_date = base_date + timedelta(days=365)
             
             school.subscription_expiry = new_expiry_date
-            
-            # Record the payment in the Payment table for bookkeeping
-            subscription_payment = Payment(
-                amount_paid=paid_amount_kobo / 100.0, # Convert kobo to Naira for storage
-                payment_date=datetime.utcnow(),
-                payment_type="Paystack Subscription",
-                term="N/A", # Subscription payment is not tied to a term/session
-                session="N/A",
-                student_id=None, # Not tied to a student
-                paystack_ref=reference
-            )
-            db.session.add(subscription_payment)
             db.session.commit()
-
-            flash(f"Subscription renewed successfully! Expires on {new_expiry_date.strftime('%B %d, %Y')}.", "success")
-            return redirect(url_for("dashboard"))
+            
+            flash("Subscription successfully renewed! You now have full access for one year.", "success")
+            
         else:
-            flash(f"Payment amount of ₦{paid_amount_kobo/100:.2f} did not match the expected ₦{expected_amount_kobo/100:.2f}.", "warning")
-            return redirect(url_for("pay_with_paystack_subscription"))
-    else:
-        # Handle failed or abandoned payments
-        flash("Payment failed or was not completed. Please try again.", "danger")
-        return redirect(url_for("pay_with_paystack_subscription"))
-
-
+            # Payment failed or verification check did not pass
+            reason = result["data"].get("gateway_response", "Verification failed.")
+            flash(f"Payment was not successful. Reason: {reason}", "danger")
+            app.logger.warning(f"Paystack Verification Fail: Ref {reference}, Status: {result['data']['status']}, Gateway: {reason}")
+            
+    except requests.exceptions.RequestException as e:
+        flash("Failed to verify payment with Paystack due to a network error.", "danger")
+        app.logger.error(f"Paystack Verification Error: {e}")
+    
+    return redirect(url_for("dashboard"))
 # ---------------------------
-# RECEIPT GENERATION
+# RECIEPT GENERATION (Placeholder, can be fully implemented with ReportLab)
 # ---------------------------
-@app.route("/receipts")
+@app.route("/receipt-generator-index")
 @login_required
 @trial_required
 def receipt_generator_index():
     school = current_school()
-    # Fetch all payments for the school, joining with student data
-    all_payments = (
-        db.session.query(Payment, Student.name, Student.reg_number)
-        .join(Student)
-        .filter(Student.school_id == school.id)
-        .order_by(Payment.payment_date.desc())
-        .limit(50) # Limit to 50 most recent payments
-        .all()
-    )
+    students_list = Student.query.filter_by(school_id=school.id).all()
     
-    # Structure the data for the template
-    payments_data = []
-    for payment, student_name, reg_number in all_payments:
-        payments_data.append({
-            "id": payment.id,
-            "date": payment.payment_date.strftime("%Y-%m-%d %H:%M"),
-            "amount_paid": payment.amount_paid,
-            "student_name": student_name,
-            "reg_number": reg_number,
-            "term": payment.term,
-            "session": payment.session
-        })
-        
-    return render_template("receipt_index.html", payments=payments_data)
+    # Provide a list of terms/sessions for the user to select for receipt generation
+    # For simplicity, let's hardcode some common values for now
+    terms = ["First Term", "Second Term", "Third Term"]
+    current_year = datetime.now().year
+    sessions = [f"{current_year}/{current_year+1}", f"{current_year-1}/{current_year}"]
+    
+    return render_template(
+        "receipt_generator.html", 
+        students=students_list,
+        terms=terms,
+        sessions=sessions
+    )
 
-
-@app.route("/generate-receipt/<int:payment_id>")
+@app.route("/generate-receipt", methods=["POST"])
 @login_required
 @trial_required
-def generate_receipt(payment_id):
+def generate_receipt():
+    student_id = request.form.get("student_id", type=int)
+    term = request.form.get("term", "").strip()
+    session_year = request.form.get("session", "").strip()
+    
     school = current_school()
-    payment = db.session.get(Payment, payment_id)
-
-    # Basic security check: ensure the payment belongs to the logged-in school
-    if not payment or payment.student.school_id != school.id:
-        flash("Receipt not found or access denied.", "danger")
+    student = db.session.get(Student, student_id)
+    
+    if not student or student.school_id != school.id:
+        flash("Student not found or unauthorized.", "danger")
         return redirect(url_for("receipt_generator_index"))
+    
+    # 1. Gather all necessary payment details for the selected term/session
+    payments = Payment.query.filter_by(
+        student_id=student.id,
+        term=term,
+        session=session_year
+    ).order_by(Payment.payment_date.asc()).all()
+    
+    if not payments:
+        flash(f"No payments found for {student.name} in {term}, {session_year}.", "warning")
+        return redirect(url_for("receipt_generator_index"))
+        
+    # 2. Calculate totals and outstanding
+    total_paid = sum(p.amount_paid for p in payments)
+    expected_fee = get_expected_fee(school.id, student.student_class, term, session_year)
+    outstanding = max(0.0, expected_fee - total_paid)
+    
+    # 3. Generate PDF content using ReportLab
+    
+    # Create an in-memory byte stream
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
 
-    pdf_buffer = generate_pdf_receipt(payment_id)
+    # --- Header (Logo and School Details) ---
+    y_pos = height - 50
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(width/2 - p.stringWidth(school.name, "Helvetica-Bold", 16)/2, y_pos, school.name)
+    y_pos -= 18
+    p.setFont("Helvetica", 10)
+    p.drawString(width/2 - p.stringWidth(school.address or "", "Helvetica", 10)/2, y_pos, school.address or "No Address Provided")
+    y_pos -= 12
+    p.drawString(width/2 - p.stringWidth(school.phone_number or "", "Helvetica", 10)/2, y_pos, f"Tel: {school.phone_number or 'N/A'}")
+    y_pos -= 30
+    
+    # Logo placement (if available)
+    logo_path = get_logo_local_path(school)
+    if logo_path:
+        try:
+            # Resize logo to fit a max width/height (e.g., 60x60)
+            p.drawImage(logo_path, 50, height - 100, width=60, height=60, preserveAspectRatio=True, anchor='nw')
+        except Exception as e:
+            app.logger.error(f"ReportLab failed to draw image: {e}")
+            p.setFont("Helvetica-Bold", 8)
+            p.drawString(50, height - 70, "LOGO MISSING")
 
-    if pdf_buffer:
-        filename = f"Receipt_{payment_id}_{payment.student.reg_number}.pdf"
-        # Send the PDF buffer as a file response
+
+    # --- Receipt Title and Details ---
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(50, y_pos, "OFFICIAL FEES RECEIPT")
+    y_pos -= 20
+    p.setFont("Helvetica", 10)
+    p.drawString(50, y_pos, f"Date Generated: {datetime.now().strftime('%d %B, %Y')}")
+    p.drawString(width - 200, y_pos, f"Reference: {datetime.now().strftime('%Y%m%d%H%M%S')}-{student_id}")
+    y_pos -= 30
+
+    # --- Student Information ---
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_pos, "STUDENT DETAILS")
+    y_pos -= 15
+    p.setFont("Helvetica", 10)
+    p.drawString(50, y_pos, f"Name: {student.name}")
+    p.drawString(width - 200, y_pos, f"Class: {student.student_class}")
+    y_pos -= 12
+    p.drawString(50, y_pos, f"Reg Number: {student.reg_number}")
+    y_pos -= 12
+    p.drawString(50, y_pos, f"Term: {term} ({session_year})")
+    y_pos -= 30
+
+    # --- Payment Breakdown Table ---
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_pos, "PAYMENT BREAKDOWN")
+    y_pos -= 15
+
+    # Table Headers
+    p.setFont("Helvetica-Bold", 10)
+    p.setFillColor(colors.black)
+    p.drawString(50, y_pos, "Date")
+    p.drawString(200, y_pos, "Payment Type")
+    p.drawString(400, y_pos, "Amount Paid (₦)")
+    p.line(50, y_pos - 2, width - 50, y_pos - 2)
+    y_pos -= 15
+
+    # Table Rows (Payments)
+    p.setFont("Helvetica", 10)
+    for payment in payments:
+        p.drawString(50, y_pos, payment.payment_date.strftime('%d %b %Y'))
+        p.drawString(200, y_pos, payment.payment_type)
+        p.drawRightString(width - 50, y_pos, f"{payment.amount_paid:,.2f}")
+        y_pos -= 15
+    
+    # --- Summary ---
+    p.line(50, y_pos - 5, width - 50, y_pos - 5)
+    y_pos -= 20
+    
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_pos, "Expected Term Fee:")
+    p.drawRightString(width - 50, y_pos, f"₦{expected_fee:,.2f}")
+    y_pos -= 15
+    
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_pos, "Total Paid This Period:")
+    p.drawRightString(width - 50, y_pos, f"₦{total_paid:,.2f}")
+    y_pos -= 15
+    
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(50, y_pos, "Outstanding Balance:")
+    p.drawRightString(width - 50, y_pos, f"₦{outstanding:,.2f}")
+    y_pos -= 40
+    
+    # --- Footer ---
+    p.setFont("Helvetica-Oblique", 9)
+    p.drawString(50, y_pos, "Verified by Administration")
+    p.line(50, y_pos - 15, 200, y_pos - 15)
+    
+    p.drawString(width - 200, y_pos, "Principal's Signature")
+    p.line(width - 200, y_pos - 15, width - 50, y_pos - 15)
+
+    p.showPage()
+    p.save()
+    
+    # Move buffer position to the beginning
+    buffer.seek(0)
+    
+    # Store the generated PDF data in the session for later download
+    session['receipt_data'] = buffer.read()
+    session['receipt_filename'] = f"Receipt_{student.reg_number}_{term.replace(' ', '')}_{session_year.replace('/', '-')}.pdf"
+    
+    flash("Receipt generated successfully! Click 'Download Receipt' to save the file.", "success")
+    # Redirect to a route that handles the actual file serving
+    return redirect(url_for("download_receipt"))
+
+@app.route("/download-receipt")
+@login_required
+@trial_required
+def download_receipt():
+    """Serves the generated receipt PDF stored in the session."""
+    receipt_data = session.pop('receipt_data', None)
+    filename = session.pop('receipt_filename', 'fees_receipt.pdf')
+    
+    if receipt_data:
+        # Create a BytesIO object from the stored data
+        buffer = BytesIO(receipt_data)
         return send_file(
-            pdf_buffer,
+            buffer,
+            download_name=filename,
             mimetype='application/pdf',
-            as_attachment=True,
-            download_name=filename
+            as_attachment=True
         )
     else:
-        flash("Could not generate PDF receipt.", "danger")
+        flash("No receipt data found. Please generate a receipt first.", "danger")
         return redirect(url_for("receipt_generator_index"))
-
-# Note: The original request had a placeholder for 'download_receipt'. 
-# We combine the generation and download into a single, cleaner route: generate_receipt.
 
 if __name__ == "__main__":
     with app.app_context():
-        # Ensure database and tables are created before running
-        db.create_all() 
+        # This is where database initialization would typically happen
+        # db.create_all()
+        pass
     app.run(debug=True)
