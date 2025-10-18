@@ -1,67 +1,98 @@
-{% extends "layout.html" %}
+<!DOCTYPE html>
 
-{% block page_title %}Payment Receipt{% endblock %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SchoolPay{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .flash-message {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
-{% block content %}
-
-<div class="max-w-xl mx-auto mt-10 bg-white shadow-lg rounded-2xl p-8">
-    <h2 class="text-2xl font-bold text-indigo-700 mb-6 text-center border-b pb-2">Payment Receipt</h2>
-
-    <div class="space-y-3 text-gray-700 mb-6 border-b pb-4">
-        <p><strong>Student:</strong> {{ payment.student.name }}</p>
-        <p><strong>Class:</strong> {{ payment.student.student_class }}</p>
-        <p><strong>Term:</strong> {{ payment.term }} ({{ payment.session }})</p>
-        <p><strong>Date:</strong> {{ payment.payment_date.strftime('%Y-%m-%d %I:%M %p') }}</p>
-        <p><strong>Payment Type:</strong> {{ payment.payment_type }}</p>
+    <div class="flash-message">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="p-4 rounded-md shadow-md text-sm text-white mb-2 {% if category == 'success' %}bg-green-500{% elif category == 'danger' %}bg-red-500{% else %}bg-blue-500{% endif %}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
     </div>
 
-    <div class="bg-gray-50 p-4 rounded-lg shadow-inner">
-        <h3 class="text-xl font-semibold text-gray-800 mb-3 border-b pb-2">Financial Summary ({{ payment.term }})</h3>
+    <div class="flex h-screen">
         
-        <div class="space-y-2">
-            <p class="flex justify-between text-gray-600">
-                <span>Expected Fee:</span>
-                <span class="font-bold text-gray-800">
-                    {{ expected_amount | currency_format }}
-                </span>
-            </p>
+        <button id="menu-toggle" class="lg:hidden fixed top-4 left-4 z-50 p-2 bg-indigo-900 text-white rounded-md shadow-lg">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        </button>
 
-            <p class="flex justify-between text-gray-600">
-                <span>Total Paid (Cumulative for Term):</span>
-                <span class="font-bold text-green-700">
-                    {{ total_paid_kobo | currency_format }}
-                </span>
-            </p>
+        <aside id="sidebar" class="bg-indigo-900 text-white w-64 p-4 space-y-4 shadow-lg flex-shrink-0
+                fixed lg:static top-0 left-0 h-full transform -translate-x-full lg:translate-x-0
+                transition-transform duration-300 ease-in-out z-40">
+            
+            <h1 class="text-2xl font-bold mb-6">School Admin</h1>
+            <nav>
+                {% set current_endpoint = request.endpoint %}
+                
+                <a href="{{ url_for('dashboard') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'dashboard' %}bg-indigo-700{% endif %}">Dashboard</a>
+                
+                <a href="{{ url_for('students') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'students' %}bg-indigo-700{% endif %}">Students</a>
+                
+                <a href="{{ url_for('list_payments') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'list_payments' %}bg-indigo-700{% endif %}">Payments</a>
+                
+                <a href="{{ url_for('add_payment') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'add_payment' %}bg-indigo-700{% endif %}">Add Payment</a>
 
-            <p class="flex justify-between text-gray-600">
-                <span>Amount Paid (This Transaction):</span>
-                <span class="font-bold text-blue-700">
-                    {{ payment.amount_paid | naira_format }}
-                </span>
-            </p>
-        </div>
+                <a href="{{ url_for('receipt_generator_index') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'receipt_generator_index' %}bg-indigo-700{% endif %}">Receipt Generator</a>
+                
+                <a href="{{ url_for('fee_structure') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'fee_structure' %}bg-indigo-700{% endif %}">Fee Structure</a>
+                
+                <!-- NEW SETTINGS LINK ADDED -->
+                <a href="{{ url_for('settings') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'settings' %}bg-indigo-700{% endif %}">Settings</a>
+                <!-- END NEW SETTINGS LINK -->
+                
+                <a href="{{ url_for('pay_with_paystack_subscription') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-indigo-700 {% if current_endpoint == 'pay_with_paystack_subscription' %}bg-indigo-700{% endif %}">Subscription</a>
+                
+            </nav>
+            <a href="{{ url_for('logout') }}" class="block py-2.5 px-4 rounded transition duration-200 hover:bg-red-500 bg-red-600 text-center">Logout</a>
+        </aside>
 
-        <div class="mt-4 pt-3 border-t border-gray-300">
-            <p class="flex justify-between text-lg">
-                <span class="font-extrabold text-red-700">OUTSTANDING BALANCE:</span>
-                <span class="font-extrabold text-2xl text-red-700">
-                    {{ outstanding_balance_kobo | currency_format }}
-                </span>
-            </p>
-        </div>
-    </div>
-    
-    <p class="text-center text-sm text-gray-500 mt-6">
-        Thank you. All amounts are displayed in Naira (₦).
-    </p>
-
-    <div class="mt-6 flex justify-center">
-        <!-- FIX: Changed endpoint from 'generate_receipt' (view) to 'download_receipt' (PDF download) -->
-        <a href="{{ url_for('download_receipt', payment_id=payment.id) }}"
-            class="bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-md hover:bg-indigo-700 transition">
-            Download & Print PDF
-        </a>
+        <main class="flex-1 p-8 overflow-y-auto lg:pt-8 pt-16">
+            <div class="mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">{% block page_title %}{% endblock %}</h2>
+            </div>
+            {% block content %}{% endblock %}
+        </main>
     </div>
 
-</div>
-{% endblock %}
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggleButton = document.getElementById('menu-toggle');
+            const sidebar = document.getElementById('sidebar');
+
+            toggleButton.addEventListener('click', () => {
+                // Toggles the sidebar visibility by manipulating the 'translate-x' class
+                sidebar.classList.toggle('-translate-x-full');
+            });
+
+            // Optional: Hide sidebar when a link is clicked on mobile
+            sidebar.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    if (window.innerWidth < 1024) { // 1024px is Tailwind's 'lg' breakpoint
+                        sidebar.classList.add('-translate-x-full');
+                    }
+                });
+            });
+        });
+    </script>
+
+</body>
+</html>
