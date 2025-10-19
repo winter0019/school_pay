@@ -1033,194 +1033,242 @@ def add_payment():
 
 
 # ---------------------------
-# RECIEPT GENERATION (Placeholder, can be fully implemented with ReportLab)
+# RECEIPT GENERATION ROUTES
 # ---------------------------
-@app.route("/receipt-generator-index")
+
+@app.route("/receipts", endpoint="receipt_generator_index")
 @login_required
 @trial_required
 def receipt_generator_index():
+    """
+    Renders the interactive search page (receipt_index.html)
+    used to select a student and view their payments.
+    """
+    return render_template("receipt_index.html")
+
+
+@app.route("/receipt/view/<int:payment_id>", endpoint="generate_receipt")
+@login_required
+@trial_required
+def generate_receipt(payment_id):
+    """
+    Generates and displays the HTML preview of the receipt.
+    """
     school = current_school()
-    students_list = Student.query.filter_by(school_id=school.id).all()
+    payment = db.session.get(Payment, payment_id)
+
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment not found or access denied.", "danger")
+        return redirect(url_for("receipt_generator_index"))
+
+    student = payment.student
     
-    # Provide a list of terms/sessions for the user to select for receipt generation
-    # For simplicity, let's hardcode some common values for now
-    terms = ["First Term", "Second Term", "Third Term"]
-    current_year = datetime.now().year
-    sessions = [f"{current_year}/{current_year+1}", f"{current_year-1}/{current_year}"]
+    logging.info(f"--- Processing Receipt ID: {payment_id} ---")
+    logging.info(f"Student Class (from Payment): '{student.student_class}'")
     
+    # FIX: Use .filter() with .ilike() for case-insensitive matching on class_name
+    fee_structure = FeeStructure.query.filter(
+        FeeStructure.school_id == school.id,
+        FeeStructure.class_name.ilike(student.student_class)
+    ).first()
+    
+    # Check if fee structure was found
+    if not fee_structure:
+        logging.warning(f"Fee structure NOT FOUND using case-insensitive search for Class: '{student.student_class}'")
+        expected_amount_naira = 0.0
+    else:
+        # FIX: The expected_amount must be divided by 100.0 because it appears to be stored in KOBO (e.g., 2000000)
+        expected_amount_naira = float(fee_structure.expected_amount) / 100.0
+        logging.info(f"Fee structure FOUND. Expected Amount (Naira): {expected_amount_naira:,.2f} from class: '{fee_structure.class_name}'")
+
+
+    # Calculate total paid for this term/session (in database value - assumed Naira)
+    total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+        Payment.student_id == student.id,
+        Payment.term == payment.term,
+        Payment.session == payment.session
+    ).scalar() or 0
+    
+    # Total paid (current and aggregate) is assumed to be stored as Naira, so no division by 100.0
+    total_paid_naira = float(total_paid_db_value) 
+
+    # Calculate outstanding balance (uses the corrected expected_amount_naira)
+    outstanding_balance_naira = max(0.0, expected_amount_naira - total_paid_naira)
+    
+    logging.info(f"Total Paid (Naira): {total_paid_naira:,.2f}")
+    logging.info(f"Outstanding Balance: {outstanding_balance_naira:,.2f}")
+    logging.info(f"----------------------------------------")
+
+    # Render the receipt preview
     return render_template(
-        "receipt_generator.html", 
-        students=students_list,
-        terms=terms,
-        sessions=sessions
+        "receipt_view.html",
+        school=school,
+        payment=payment,
+        student=student,
+        expected_amount=expected_amount_naira,
+        total_paid=total_paid_naira,
+        outstanding_balance=outstanding_balance_naira,
+        logo_path=get_logo_path(school)
     )
 
-@app.route("/generate-receipt", methods=["POST"])
+
+@app.route("/receipt/download/<int:payment_id>", endpoint="download_receipt")
 @login_required
 @trial_required
-def generate_receipt():
-    student_id = request.form.get("student_id", type=int)
-    term = request.form.get("term", "").strip()
-    session_year = request.form.get("session", "").strip()
-    
+def download_receipt(payment_id):
+    """Generates and downloads a PDF receipt."""
     school = current_school()
-    student = db.session.get(Student, student_id)
-    
-    if not student or student.school_id != school.id:
-        flash("Student not found or unauthorized.", "danger")
+    payment = db.session.get(Payment, payment_id)
+
+    if not payment or payment.student.school_id != school.id:
+        flash("Payment not found or access denied.", "danger")
         return redirect(url_for("receipt_generator_index"))
-    
-    # 1. Gather all necessary payment details for the selected term/session
-    payments = Payment.query.filter_by(
-        student_id=student.id,
-        term=term,
-        session=session_year
-    ).order_by(Payment.payment_date.asc()).all()
-    
-    if not payments:
-        flash(f"No payments found for {student.name} in {term}, {session_year}.", "warning")
-        return redirect(url_for("receipt_generator_index"))
-        
-    # 2. Calculate totals and outstanding
-    total_paid = sum(p.amount_paid for p in payments)
-    expected_fee = get_expected_fee(school.id, student.student_class, term, session_year)
-    outstanding = max(0.0, expected_fee - total_paid)
-    
-    # 3. Generate PDF content using ReportLab
-    
-    # Create an in-memory byte stream
+
+    student = payment.student
     buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=A4)
+    c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # --- Header (Logo and School Details) ---
-    y_pos = height - 50
-    p.setFont("Helvetica-Bold", 16)
-    p.drawString(width/2 - p.stringWidth(school.name, "Helvetica-Bold", 16)/2, y_pos, school.name)
-    y_pos -= 18
-    p.setFont("Helvetica", 10)
-    p.drawString(width/2 - p.stringWidth(school.address or "", "Helvetica", 10)/2, y_pos, school.address or "No Address Provided")
-    y_pos -= 12
-    p.drawString(width/2 - p.stringWidth(school.phone_number or "", "Helvetica", 10)/2, y_pos, f"Tel: {school.phone_number or 'N/A'}")
-    y_pos -= 30
+    # FIX: Use .filter() with .ilike() for case-insensitive matching on class_name
+    fee_structure = FeeStructure.query.filter(
+        FeeStructure.school_id == school.id,
+        FeeStructure.class_name.ilike(student.student_class)
+    ).first()
+
+    # Check if fee structure was found
+    if not fee_structure:
+        expected_amount = 0.0
+    else:
+        # FIX: The expected_amount must be divided by 100.0 because it appears to be stored in KOBO (e.g., 2000000)
+        expected_amount = float(fee_structure.expected_amount) / 100.0
+
+    # Calculate total paid for this term/session (in database value - assumed Naira)
+    total_paid_db_value = db.session.query(db.func.sum(Payment.amount_paid)).filter(
+        Payment.student_id == student.id,
+        Payment.term == payment.term,
+        Payment.session == payment.session
+    ).scalar() or 0
+
+    # Total paid amount is assumed to be stored as Naira, so no division by 100.0
+    total_paid = float(total_paid_db_value)
     
-    # Logo placement (if available)
-    logo_path = get_logo_local_path(school)
+    outstanding_balance = max(0.0, expected_amount - total_paid)
+
+    # 4. Draw PDF elements
+    # Define layout constants
+    LOGO_MARGIN_X = 50
+    TEXT_START_X = 150 
+    LOGO_WIDTH = 80
+    LOGO_HEIGHT = 80
+    TOP_Y_POS = height - 20 
+
+    # --- School Logo ---
+    logo_path = None
+    if school.logo_filename:
+        try:
+            logo_path = os.path.join(current_app.root_path, current_app.config["UPLOAD_FOLDER"], secure_filename(school.logo_filename))
+        except NameError:
+             logo_path = school.logo_filename 
+        
+        if logo_path and not os.path.exists(logo_path):
+            logo_path = None
+
     if logo_path:
         try:
-            # Resize logo to fit a max width/height (e.g., 60x60)
-            p.drawImage(logo_path, 50, height - 100, width=60, height=60, preserveAspectRatio=True, anchor='nw')
+            c.drawImage(
+                logo_path, 
+                LOGO_MARGIN_X, 
+                TOP_Y_POS - LOGO_HEIGHT, 
+                width=LOGO_WIDTH, 
+                height=LOGO_HEIGHT, 
+                preserveAspectRatio=True, 
+                anchor='n'
+            )
         except Exception as e:
-            app.logger.error(f"ReportLab failed to draw image: {e}")
-            p.setFont("Helvetica-Bold", 8)
-            p.drawString(50, height - 70, "LOGO MISSING")
-
-
-    # --- Receipt Title and Details ---
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(50, y_pos, "OFFICIAL FEES RECEIPT")
-    y_pos -= 20
-    p.setFont("Helvetica", 10)
-    p.drawString(50, y_pos, f"Date Generated: {datetime.now().strftime('%d %B, %Y')}")
-    p.drawString(width - 200, y_pos, f"Reference: {datetime.now().strftime('%Y%m%d%H%M%S')}-{student_id}")
-    y_pos -= 30
-
-    # --- Student Information ---
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, y_pos, "STUDENT DETAILS")
-    y_pos -= 15
-    p.setFont("Helvetica", 10)
-    p.drawString(50, y_pos, f"Name: {student.name}")
-    p.drawString(width - 200, y_pos, f"Class: {student.student_class}")
-    y_pos -= 12
-    p.drawString(50, y_pos, f"Reg Number: {student.reg_number}")
-    y_pos -= 12
-    p.drawString(50, y_pos, f"Term: {term} ({session_year})")
-    y_pos -= 30
-
-    # --- Payment Breakdown Table ---
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, y_pos, "PAYMENT BREAKDOWN")
-    y_pos -= 15
-
-    # Table Headers
-    p.setFont("Helvetica-Bold", 10)
-    p.setFillColor(colors.black)
-    p.drawString(50, y_pos, "Date")
-    p.drawString(200, y_pos, "Payment Type")
-    p.drawString(400, y_pos, "Amount Paid (₦)")
-    p.line(50, y_pos - 2, width - 50, y_pos - 2)
-    y_pos -= 15
-
-    # Table Rows (Payments)
-    p.setFont("Helvetica", 10)
-    for payment in payments:
-        p.drawString(50, y_pos, payment.payment_date.strftime('%d %b %Y'))
-        p.drawString(200, y_pos, payment.payment_type)
-        p.drawRightString(width - 50, y_pos, f"{payment.amount_paid:,.2f}")
-        y_pos -= 15
+            logging.error(f"Failed to draw logo onto PDF: {e}")
+            
+    # Title and School Info
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(TEXT_START_X, height - 50, "Official School Fee Receipt")
     
-    # --- Summary ---
-    p.line(50, y_pos - 5, width - 50, y_pos - 5)
-    y_pos -= 20
+    c.setFont("Helvetica", 10)
+    c.drawString(TEXT_START_X, height - 70, f"School: {school.name}")
+    c.drawString(TEXT_START_X, height - 85, f"Address: {school.address or 'N/A'}")
+    c.drawString(TEXT_START_X, height - 100, f"Phone: {school.phone_number or 'N/A'}")
     
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, y_pos, "Expected Term Fee:")
-    p.drawRightString(width - 50, y_pos, f"₦{expected_fee:,.2f}")
-    y_pos -= 15
+    # Receipt Details
+    c.setFont("Helvetica", 12)
+    c.drawString(400, height - 70, f"Receipt No: {payment.id}")
+    c.drawString(400, height - 85, f"Date: {payment.payment_date.strftime('%Y-%m-%d')}")
     
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, y_pos, "Total Paid This Period:")
-    p.drawRightString(width - 50, y_pos, f"₦{total_paid:,.2f}")
-    y_pos -= 15
-    
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(50, y_pos, "Outstanding Balance:")
-    p.drawRightString(width - 50, y_pos, f"₦{outstanding:,.2f}")
-    y_pos -= 40
-    
-    # --- Footer ---
-    p.setFont("Helvetica-Oblique", 9)
-    p.drawString(50, y_pos, "Verified by Administration")
-    p.line(50, y_pos - 15, 200, y_pos - 15)
-    
-    p.drawString(width - 200, y_pos, "Principal's Signature")
-    p.line(width - 200, y_pos - 15, width - 50, y_pos - 15)
+    # Student Details
+    y_pos = height - 150
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y_pos, "--- Student Details ---")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y_pos - 20, f"Name: {student.name}")
+    c.drawString(50, y_pos - 35, f"Reg. No: {student.reg_number}")
+    c.drawString(50, y_pos - 50, f"Class: {student.student_class}")
 
-    p.showPage()
-    p.save()
+    # Payment Details
+    y_pos -= 80
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y_pos, "--- Payment Information ---")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y_pos - 20, f"Term: {payment.term}")
+    c.drawString(50, y_pos - 35, f"Session: {payment.session}")
+    c.drawString(50, y_pos - 50, f"Payment Type: {payment.payment_type}")
     
-    # Move buffer position to the beginning
+    # Amount Details (Current Payment)
+    current_amount_naira = float(payment.amount_paid) 
+    current_amount_str = f"₦{current_amount_naira:,.2f}"
+    
+    c.setFillColor(colors.green)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y_pos - 80, "Amount Received:")
+    c.drawString(200, y_pos - 80, current_amount_str)
+    c.setFillColor(colors.black)
+
+    # Financial Summary
+    summary_y_pos = y_pos - 120 
+    
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, summary_y_pos, "--- Account Status for Period ---")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(50, summary_y_pos - 20, "Expected Fee:")
+    c.drawString(200, summary_y_pos - 20, f"₦{expected_amount:,.2f}") 
+    
+    c.drawString(50, summary_y_pos - 40, "Total Paid to Date:")
+    c.drawString(200, summary_y_pos - 40, f"₦{total_paid:,.2f}") 
+    
+    c.setFont("Helvetica-Bold", 12)
+    if outstanding_balance > 0:
+        c.setFillColor(colors.red)
+    else:
+        c.setFillColor(colors.black)
+
+    c.drawString(50, summary_y_pos - 60, "Outstanding Balance:")
+    c.drawString(200, summary_y_pos - 60, f"₦{outstanding_balance:,.2f}")
+    c.setFillColor(colors.black)
+
+    # Footer/Signature
+    c.setFont("Helvetica-Oblique", 10)
+    c.drawString(50, 50, "This is an electronically generated receipt and requires no signature.")
+    
+    c.showPage()
+    c.save()
     buffer.seek(0)
     
-    # Store the generated PDF data in the session for later download
-    session['receipt_data'] = buffer.read()
-    session['receipt_filename'] = f"Receipt_{student.reg_number}_{term.replace(' ', '')}_{session_year.replace('/', '-')}.pdf"
+    filename = f"receipt_{payment.id}_{student.reg_number}.pdf"
     
-    flash("Receipt generated successfully! Click 'Download Receipt' to save the file.", "success")
-    # Redirect to a route that handles the actual file serving
-    return redirect(url_for("download_receipt"))
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/pdf'
+    )
 
-@app.route("/download-receipt")
-@login_required
-@trial_required
-def download_receipt():
-    """Serves the generated receipt PDF stored in the session."""
-    receipt_data = session.pop('receipt_data', None)
-    filename = session.pop('receipt_filename', 'fees_receipt.pdf')
-    
-    if receipt_data:
-        # Create a BytesIO object from the stored data
-        buffer = BytesIO(receipt_data)
-        return send_file(
-            buffer,
-            download_name=filename,
-            mimetype='application/pdf',
-            as_attachment=True
-        )
-    else:
-        flash("No receipt data found. Please generate a receipt first.", "danger")
-        return redirect(url_for("receipt_generator_index"))
 
 # ---------------------------
 # FEE STRUCTURE ROUTES (Create, Read, Update)
@@ -1347,6 +1395,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
