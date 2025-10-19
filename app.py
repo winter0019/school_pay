@@ -746,14 +746,23 @@ def students():
 @login_required
 def edit_student(student_id):
     school = current_school()
-    admin_user = current_user() # Assuming this fetches the logged-in Admin object
-    student = Student.query.filter_by(id=student_id, school_id=school.id).first_or_404()
+    admin_user = current_user() 
+
+    # 🔑 FIX: Only retrieve ACTIVE students (is_deleted=False). 
+    # If the student ID belongs to a soft-deleted record, it will correctly return a 404, 
+    # resolving the 500 error that occurs when processing deleted records in some contexts.
+    student = Student.query.filter_by(
+        id=student_id, 
+        school_id=school.id,
+        is_deleted=False # <-- Crucial filter for stability
+    ).first_or_404()
 
     if request.method == "POST":
         admin_password = request.form.get("admin_password")
         
         # === PASSWORD VERIFICATION CHECK ===
         # Assuming current_user() provides an object with a 'password_hash' attribute
+        # NOTE: Ensure check_password_hash is imported from werkzeug.security
         if not admin_password or not check_password_hash(admin_user.password_hash, admin_password):
             flash("Authorization Failed: Incorrect admin password. Changes were not saved.", "danger")
             # Render the form again, keeping existing data
@@ -765,21 +774,22 @@ def edit_student(student_id):
             reg_number = request.form.get("reg_number").strip()
             student_class = request.form.get("student_class").strip()
 
-            # Optional: Check if the new reg_number is unique among other students
+            # Optional: Check if the new reg_number is unique among other ACTIVE students
+            # It's important to only check against active students for uniqueness
             existing_reg = Student.query.filter(
                 Student.school_id == school.id,
                 Student.reg_number == reg_number,
-                Student.id != student_id
+                Student.id != student_id,
+                Student.is_deleted == False # <-- Check uniqueness only against ACTIVE students
             ).first()
 
             if existing_reg:
-                flash(f"Registration number '{reg_number}' is already in use by another student.", "danger")
+                flash(f"Registration number '{reg_number}' is already in use by another active student.", "danger")
                 return render_template("edit_student.html", student=student)
 
             student.name = name
             student.reg_number = reg_number
             student.student_class = student_class
-            # Add more fields as needed: student.parent_name = request.form.get("parent_name")
             
             db.session.commit()
             flash(f"Student {student.name}'s details updated successfully.", "success")
@@ -792,7 +802,6 @@ def edit_student(student_id):
             flash("An error occurred while updating the student's details.", "danger")
 
     return render_template("edit_student.html", student=student)
-
 
 # ---------------------------
 # SOFT DELETE STUDENT
@@ -1508,6 +1517,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
