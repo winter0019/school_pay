@@ -180,12 +180,21 @@ class FeeStructure(db.Model):
 # HELPERS
 # ---------------------------
 
+
 def current_school():
     """Retrieves the current school object from the database using the session ID."""
     if "school_id" in session:
         # Use .get() which returns None if ID not found, avoiding an exception
-        return db.session.get(School, session["school_id"])
+        # Assuming 'db' and 'School' are defined and imported globally
+        return db.session.get(School, session["school_id"]) 
     return None
+
+def current_user():
+    """
+    FIX: Defines the missing function. 
+    Retrieves the entity used as the 'user' for admin authentication (the School object).
+    """
+    return current_school()
 
 def login_required(f):
     """Decorator to ensure the user is logged in."""
@@ -1517,6 +1526,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
