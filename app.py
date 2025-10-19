@@ -118,7 +118,16 @@ class Student(db.Model):
     reg_number = db.Column(db.String(50), nullable=False)
     student_class = db.Column(db.String(50), nullable=False)
     school_id = db.Column(db.Integer, db.ForeignKey("school.id"), nullable=False)
+    
+    # === NEW COLUMN FOR SOFT DELETION ===
+    is_deleted = db.Column(db.Boolean, server_default=expression.false(), nullable=False)
+    # ====================================
+    
     payments = db.relationship("Payment", backref="student", lazy=True)
+
+    # Optional: __repr__ method for better debugging
+    def __repr__(self):
+        return f"Student('{self.name}', '{self.reg_number}')"
 
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1498,6 +1507,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
