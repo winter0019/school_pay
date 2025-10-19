@@ -749,32 +749,28 @@ def students():
 
 
 # ---------------------------
-# EDIT STUDENT
+# EDIT STUDENT (Fixes password attribute name)
 # ---------------------------
 @app.route("/students/edit/<int:student_id>", methods=["GET", "POST"])
 @login_required
 def edit_student(student_id):
     school = current_school()
     admin_user = current_user() 
-
-    # 🔑 FIX: Only retrieve ACTIVE students (is_deleted=False). 
-    # If the student ID belongs to a soft-deleted record, it will correctly return a 404, 
-    # resolving the 500 error that occurs when processing deleted records in some contexts.
+    
+    # Stability FIX: Filter by is_deleted=False
     student = Student.query.filter_by(
         id=student_id, 
         school_id=school.id,
-        is_deleted=False # <-- Crucial filter for stability
+        is_deleted=False
     ).first_or_404()
 
     if request.method == "POST":
         admin_password = request.form.get("admin_password")
         
         # === PASSWORD VERIFICATION CHECK ===
-        # Assuming current_user() provides an object with a 'password_hash' attribute
-        # NOTE: Ensure check_password_hash is imported from werkzeug.security
-        if not admin_password or not check_password_hash(admin_user.password_hash, admin_password):
+        # 💥 FIX HERE: Changed 'password_hash' to 'password' based on error
+        if not admin_password or not check_password_hash(admin_user.password, admin_password):
             flash("Authorization Failed: Incorrect admin password. Changes were not saved.", "danger")
-            # Render the form again, keeping existing data
             return render_template("edit_student.html", student=student)
 
         # If password is correct, proceed with the update
@@ -783,13 +779,12 @@ def edit_student(student_id):
             reg_number = request.form.get("reg_number").strip()
             student_class = request.form.get("student_class").strip()
 
-            # Optional: Check if the new reg_number is unique among other ACTIVE students
-            # It's important to only check against active students for uniqueness
+            # Check if the new reg_number is unique among other ACTIVE students
             existing_reg = Student.query.filter(
                 Student.school_id == school.id,
                 Student.reg_number == reg_number,
                 Student.id != student_id,
-                Student.is_deleted == False # <-- Check uniqueness only against ACTIVE students
+                Student.is_deleted == False 
             ).first()
 
             if existing_reg:
@@ -806,7 +801,6 @@ def edit_student(student_id):
 
         except Exception as e:
             db.session.rollback()
-            # Log the error for debugging
             print(f"Error during student edit: {e}")
             flash("An error occurred while updating the student's details.", "danger")
 
@@ -1526,6 +1520,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
