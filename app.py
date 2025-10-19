@@ -23,6 +23,7 @@ from reportlab.lib import colors
 from dotenv import load_dotenv
 from PIL import Image
 from sqlalchemy import func
+from sqlalchemy.sql import expression
 
 
 # Set up logging for better error tracking
@@ -1507,6 +1508,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
