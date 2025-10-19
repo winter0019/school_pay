@@ -1,127 +1,230 @@
+
 <!DOCTYPE html>
+
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}SchoolPay Admin{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>{% block title %}SchoolPay Admin{% endblock %}</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    </head>
+
 <body class="bg-gray-100 font-sans antialiased">
 
-    <div id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-indigo-900 shadow-xl 
-        transition-transform duration-300 transform -translate-x-full lg:translate-x-0">
-        <div class="p-6 text-white h-full flex flex-col">
-            <div class="text-2xl font-extrabold mb-10 border-b border-indigo-700 pb-4">
-                School Admin
-            </div>
 
-                        <nav class="space-y-1 flex-grow">
-                                <a href="{{ url_for('dashboard') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-10v10a1 1 0 001 1h3m-10-9v6m-4-6h8"></path></svg>
-                    Dashboard
-                </a>
-                <a href="{{ url_for('students') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20v-2m0 2h2m-4-2H7m4 0h5m4-12H9M3 10h18M3 14h18M4 7h16"></path></svg>
-                    Students
-                </a>
-                <a href="{{ url_for('list_payments') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c1.657 0 3 .895 3 2s-1.343 2-3 2-3 .895-3 2 1.343 2 3 2m0-8V6m0 4v4m0 4v2m-6-2h12"></path></svg>
-                    Payments
-                </a>
-                   <a href="{{ url_for('receipt_generator_index') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                    Receipt Generator
-                </a>
-                <a href="{{ url_for('add_payment') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Add Payment
-                </a>
-            </nav>
+    <div id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-indigo-900 shadow-xl 
 
-                        <div class="mt-auto pt-4 border-t border-indigo-700 space-y-1">
-                <a href="{{ url_for('settings') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37h.001z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                    Settings
+        transition-transform duration-300 -translate-x-full lg:translate-x-0">
+
+        <div class="p-6 text-white h-full flex flex-col">
+
+            <div class="text-2xl font-extrabold mb-10 border-b border-indigo-700 pb-4">
+
+                School Admin
+
+            </div>
+
+
+            <nav class="space-y-2 flex-grow">
+
+                <a href="{{ url_for('dashboard') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
+
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-10v10a1 1 0 001 1h3m-10-9v6m-4-6h8"></path></svg>
+
+                    Dashboard
+
                 </a>
 
-                   <a href="{{ url_for('pay_with_paystack_subscription') }}" class="flex items-center py-1.5 px-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                    Manage Subscription
-                </a>
-                <a href="{{ url_for('logout') }}" class="flex items-center py-1.5 px-3 rounded-lg text-red-300 hover:bg-indigo-700 hover:text-red-100 transition duration-200 mt-2">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1m-6 0h6m-4-6h4"></path></svg>
-                    Logout
-                </a>
-            </div>
-        </div>
-    </div>
+                <a href="{{ url_for('students') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
 
-    <div id="sidebar-backdrop" class="fixed inset-0 bg-black opacity-50 z-30 hidden lg:hidden" onclick="toggleSidebar()"></div>
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20v-2m0 2h2m-4-2H7m4 0h5m4-12H9M3 10h18M3 14h18M4 7h16"></path></svg>
 
-    <div id="main-content" class="min-h-screen lg:ml-64">
-        
-        <header class="bg-white shadow-sm p-4 sticky top-0 z-10">
-            <div class="flex items-center justify-between">
-                <button id="sidebar-toggle" class="lg:hidden p-2 text-indigo-700 hover:text-indigo-900 focus:outline-none" onclick="toggleSidebar()">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-                </button>
-                
-                <h1 class="text-xl font-semibold text-gray-800 lg:ml-0">
-                    {% block header_title %}Dashboard{% endblock %}
-                </h1>
+                    Students
 
-                <div class="flex items-center space-x-3">
-                    <span class="text-sm text-gray-600 hidden sm:inline">Admin User</span>
-                    <div class="h-8 w-8 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold">A</div>
-                </div>
-            </div>
-        </header>
+                </a>
 
-        <main class="p-4 sm:p-6 lg:p-8">
-            {% block content %}
-            {% endblock %}
-        </main>
-    </div>
+                <a href="{{ url_for('list_payments') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
 
-    <script>
-        const sidebar = document.getElementById('sidebar');
-        const backdrop = document.getElementById('sidebar-backdrop');
-        const translateClass = 'translate-x-0';
-        
-        // Function to toggle the sidebar on small screens
-        function toggleSidebar() {
-            // Check if the screen is large (desktop view)
-            if (window.innerWidth >= 1024) {
-                return; // Do nothing if on desktop
-            }
-            
-            // Toggle the 'translate-x-0' class to show/hide the sidebar
-            // This class overrides the default '-translate-x-full' from the HTML
-            sidebar.classList.toggle(translateClass);
-            
-            // Toggle the visibility of the dark overlay backdrop
-            backdrop.classList.toggle('hidden');
-        }
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c1.657 0 3 .895 3 2s-1.343 2-3 2-3 .895-3 2 1.343 2 3 2m0-8V6m0 4v4m0 4v2m-6-2h12"></path></svg>
+
+                    Payments
+
+                </a>
+
+                   <a href="{{ url_for('receipt_generator_index') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
+
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+
+                    Receipt Generator
+
+                </a>
+
+                <a href="{{ url_for('add_payment') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
+
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+
+                    Add Payment
+
+                </a>
+
+            </nav>
+
+
+            <div class="mt-auto pt-4 border-t border-indigo-700">
+
+                   <a href="{{ url_for('pay_with_paystack_subscription') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
+
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+
+                    Manage Subscription
+
+                </a>
+
+                <a href="{{ url_for('logout') }}" class="flex items-center p-3 rounded-lg text-red-300 hover:bg-indigo-700 hover:text-red-100 transition duration-200 mt-2">
+
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1m-6 0h6m-4-6h4"></path></svg>
+
+                    Logout
+
+                </a>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div id="sidebar-backdrop" class="fixed inset-0 bg-black opacity-50 z-30 hidden lg:hidden" onclick="toggleSidebar()"></div>
+
+
+    <div id="main-content" class="min-h-screen **lg:ml-64**">
+
         
-        // Add event listener to close the sidebar on backdrop click
-        backdrop.addEventListener('click', toggleSidebar);
 
-        // Close the sidebar if the screen resizes from mobile to desktop
-        window.addEventListener('resize', () => {
-            if (window.innerWidth >= 1024) {
-                // Remove the mobile-open class to ensure it doesn't conflict
-                sidebar.classList.remove(translateClass);
-                backdrop.classList.add('hidden');
-            }
-        });
+        <header class="bg-white shadow-sm p-4 sticky top-0 z-10">
 
-        // Initial check on load to ensure proper state
-        window.onload = () => {
-            if (window.innerWidth < 1024) {
-                sidebar.classList.remove(translateClass); // Ensure it starts hidden on mobile
-                backdrop.classList.add('hidden');
-            }
-        };
-    </script>
+            <div class="flex items-center justify-between">
+
+                <button id="sidebar-toggle" class="lg:hidden p-2 text-indigo-700 hover:text-indigo-900 focus:outline-none" onclick="toggleSidebar()">
+
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+
+                </button>
+
+                
+
+                <h1 class="text-xl font-semibold text-gray-800 lg:ml-0">
+
+                    {% block header_title %}Dashboard{% endblock %}
+
+                </h1>
+
+
+                <div class="flex items-center space-x-3">
+
+                    <span class="text-sm text-gray-600 hidden sm:inline">Admin User</span>
+
+                    <div class="h-8 w-8 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold">A</div>
+
+                </div>
+
+            </div>
+
+        </header>
+
+
+        <main class="p-4 sm:p-6 lg:p-8">
+
+            {% block content %}
+
+            {% endblock %}
+
+        </main>
+
+    </div>
+
+
+    <script>
+
+        const sidebar = document.getElementById('sidebar');
+
+        const backdrop = document.getElementById('sidebar-backdrop');
+
+        const translateClass = 'translate-x-0';
+
+        
+
+        // Function to toggle the sidebar on small screens
+
+        function toggleSidebar() {
+
+            // Check if the screen is large (desktop view)
+
+            if (window.innerWidth >= 1024) {
+
+                return; // Do nothing if on desktop
+
+            }
+
+            
+
+            // Toggle the 'translate-x-0' class to show/hide the sidebar
+
+            // This class overrides the default '-translate-x-full' from the HTML
+
+            sidebar.classList.toggle(translateClass);
+
+            
+
+            // Toggle the visibility of the dark overlay backdrop
+
+            backdrop.classList.toggle('hidden');
+
+        }
+
+
+        // Close the sidebar if the screen resizes from mobile to desktop
+
+        window.addEventListener('resize', () => {
+
+            if (window.innerWidth >= 1024) {
+
+                // Remove the mobile-open class to ensure it doesn't conflict
+
+                sidebar.classList.remove(translateClass);
+
+                backdrop.classList.add('hidden');
+
+            }
+
+        });
+
+
+        // The onload is no longer strictly necessary because -translate-x-full 
+
+        // is the default, but we'll keep the resize logic clean.
+
+        window.onload = () => {
+
+            if (window.innerWidth < 1024) {
+
+                sidebar.classList.remove(translateClass); // Ensure it starts hidden on mobile
+
+                backdrop.classList.add('hidden');
+
+            }
+
+        };
+
+    </script>
+
 </body>
+
 </html>
