@@ -54,11 +54,14 @@ class Config:
     UPLOAD_FOLDER = os.path.join("static", "logos")
     ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
     
+
     PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY")
     PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY")
-    PAYSTACK_SUBSCRIPTION_AMOUNT = 100000 # in kobo, for NGN 1,000
+    # Set to 100,000 kobo (1000 * 100) for the correct NGN 1,000.00 amount
+    PAYSTACK_SUBSCRIPTION_AMOUNT = 100000 
     
     TRIAL_LIMIT = 2 # Student count limit enforced after trial expires
+
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -1397,6 +1400,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
