@@ -559,7 +559,7 @@ def calculate_total_outstanding_dynamic(school):
     return total_outstanding_naira
 
 # ---------------------------
-# DASHBOARD (CLEANED AND FIXED)
+# DASHBOARD (TOTAL PAYMENTS & OUTSTANDING = ALL-TIME DEFAULT)
 # ---------------------------
 @app.route("/dashboard")
 @login_required
@@ -570,28 +570,27 @@ def dashboard():
         flash("No school record found. Please log in again.", "danger")
         return redirect(url_for("index"))
 
-    # We need to assume a current term and session for "Payments This Term"
-    # These should ideally be set globally or fetched from user input/settings
-    current_term, current_session = "Third Term", "2025/2026"
+    # Removed: current_term, current_session variables as they are no longer needed
+    # for the Total Payments calculation.
 
     total_students = Student.query.filter_by(school_id=school.id).count()
 
-    # 1. Calculate Payments This Term (Stored in Naira, converted to Kobo for template)
-    payments_this_term_naira = (
+    # 1. Calculate TOTAL Payments (ALL-TIME) 💰
+    # Filtered only by school_id to get the historical total.
+    total_payments_naira = (
         db.session.query(db.func.sum(Payment.amount_paid))
         .join(Student)
         .filter(
-            Student.school_id == school.id,
-            Payment.term == current_term,
-            Payment.session == current_session
+            Student.school_id == school.id
         )
         .scalar()
     ) or 0
     # Convert payments from Naira (Float) to Kobo (Integer) for template display
-    payments_this_term_kobo = int(float(payments_this_term_naira) * 100)
+    total_payments_kobo = int(float(total_payments_naira) * 100)
 
-    # 2. Calculate Outstanding Balance using the dynamic helper (Result in Naira)
-    # The 'calculate_total_outstanding_dynamic' function provided earlier is critical here.
+    # 2. Calculate Outstanding Balance (ALL-TIME default) 
+    # This calculation uses the helper function, which defaults to All-Time
+    # when no term/session filters are provided.
     total_outstanding_naira = calculate_total_outstanding_dynamic(school)
     
     # Convert final outstanding balance to KOBO for template display
@@ -614,11 +613,11 @@ def dashboard():
         school=school,
         subscription_active=subscription_active,
         total_students=total_students,
-        total_payments=payments_this_term_kobo, 
+        # Now displaying the historical, all-time total payments
+        total_payments=total_payments_kobo, 
         outstanding_balance=outstanding_balance_kobo,
         recent_payments=recent_payments,
     )
-
 
 # ---------------------------
 # SETTINGS/PROFILE PAGE (CLEANED)
@@ -1400,6 +1399,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
