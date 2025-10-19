@@ -5,23 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}SchoolPay Admin{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+    </head>
 <body class="bg-gray-100 font-sans antialiased">
 
     <div id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-indigo-900 shadow-xl 
         transition-transform duration-300 transform -translate-x-full lg:translate-x-0">
         <div class="p-6 text-white h-full flex flex-col">
-            
-                        <div class="text-2xl font-extrabold mb-10 border-b border-indigo-700 pb-4">
-                {% if school and school.logo_filename %}
-                <img src="{{ url_for('static', filename='uploads/logos/' + school.logo_filename) }}" 
-                     alt="{{ school.name }} Logo" 
-                     class="h-8 w-auto object-contain">
-                {% else %}
+            <div class="text-2xl font-extrabold mb-10 border-b border-indigo-700 pb-4">
                 School Admin
-                {% endif %}
             </div>
-                        <nav class="space-y-2 flex-grow">
+
+            <nav class="space-y-2 flex-grow">
                 <a href="{{ url_for('dashboard') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
                     <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-10v10a1 1 0 001 1h3m-10-9v6m-4-6h8"></path></svg>
                     Dashboard
@@ -35,7 +29,7 @@
                     Payments
                 </a>
                    <a href="{{ url_for('receipt_generator_index') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
-                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 012-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                     Receipt Generator
                 </a>
                 <a href="{{ url_for('add_payment') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
@@ -50,7 +44,7 @@
                     <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37h.001z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     Settings
                 </a>
-                
+
                    <a href="{{ url_for('pay_with_paystack_subscription') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
                     <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     Manage Subscription
@@ -73,18 +67,12 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                 </button>
                 
-                <h1 class="text-xl font-semibold text-gray-800">
+                <h1 class="text-xl font-semibold text-gray-800 lg:ml-0">
                     {% block header_title %}Dashboard{% endblock %}
                 </h1>
 
                 <div class="flex items-center space-x-3">
-
-                    {% if school and school.logo_filename %}
-                    <img src="{{ url_for('static', filename='uploads/logos/' + school.logo_filename) }}" 
-                        alt="{{ school.name }} Logo" 
-                        class="h-10 w-auto object-contain mr-4 hidden sm:block">
-                    {% endif %}
-                                        <span class="text-sm text-gray-600 hidden sm:inline">Admin User</span>
+                    <span class="text-sm text-gray-600 hidden sm:inline">Admin User</span>
                     <div class="h-8 w-8 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold">A</div>
                 </div>
             </div>
