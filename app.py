@@ -680,6 +680,8 @@ def students():
     school = current_school()
     
     if request.method == "POST":
+        # Note: We must count ALL students here (including soft-deleted) to enforce the limit
+        # This prevents bypassing the limit by deleting students.
         student_count = Student.query.filter_by(school_id=school.id).count()
         subscription_endpoint = 'pay_with_paystack_subscription'
         
@@ -695,6 +697,7 @@ def students():
         if not all([name, reg_number, student_class]):
             flash("All fields are required.", "danger")
         else:
+            # Check for existing student (including soft-deleted ones)
             existing_student = Student.query.filter_by(school_id=school.id, reg_number=reg_number).first()
             if existing_student:
                 flash(f"Student with registration number '{reg_number}' already exists.", "danger")
@@ -710,13 +713,109 @@ def students():
                 flash("Student added successfully.", "success")
         return redirect(url_for("students"))
         
-    students_list = Student.query.filter_by(school_id=school.id).all()
-    student_count = len(students_list)
-    # Logic for display banner: trial active if time hasn't expired OR student count is below limit.
-    trial_active = school.subscription_expiry >= datetime.today().date() or student_count < current_app.config['TRIAL_LIMIT']
+    # Query to fetch ACTIVE students only (is_deleted=False) for the list view
+    students_list = Student.query.filter_by(school_id=school.id, is_deleted=False).order_by(Student.name).all()
     
-    return render_template("students.html", students=students_list, student_count=student_count, trial_limit=current_app.config['TRIAL_LIMIT'], trial_active=trial_active)
+    # Calculate the count based on ALL students for the limit check/display logic
+    student_count_all = Student.query.filter_by(school_id=school.id).count()
+    
+    # Logic for display banner: trial active if time hasn't expired OR ALL student count is below limit.
+    trial_active = school.subscription_expiry >= datetime.today().date() or student_count_all < current_app.config['TRIAL_LIMIT']
+    
+    return render_template("students.html", 
+                           students=students_list, 
+                           student_count=student_count_all, 
+                           trial_limit=current_app.config['TRIAL_LIMIT'], 
+                           trial_active=trial_active)
 
+
+# ---------------------------
+# EDIT STUDENT
+# ---------------------------
+@app.route("/students/edit/<int:student_id>", methods=["GET", "POST"])
+@login_required
+def edit_student(student_id):
+    school = current_school()
+    admin_user = current_user() # Assuming this fetches the logged-in Admin object
+    student = Student.query.filter_by(id=student_id, school_id=school.id).first_or_404()
+
+    if request.method == "POST":
+        admin_password = request.form.get("admin_password")
+        
+        # === PASSWORD VERIFICATION CHECK ===
+        # Assuming current_user() provides an object with a 'password_hash' attribute
+        if not admin_password or not check_password_hash(admin_user.password_hash, admin_password):
+            flash("Authorization Failed: Incorrect admin password. Changes were not saved.", "danger")
+            # Render the form again, keeping existing data
+            return render_template("edit_student.html", student=student)
+
+        # If password is correct, proceed with the update
+        try:
+            name = request.form.get("name").strip()
+            reg_number = request.form.get("reg_number").strip()
+            student_class = request.form.get("student_class").strip()
+
+            # Optional: Check if the new reg_number is unique among other students
+            existing_reg = Student.query.filter(
+                Student.school_id == school.id,
+                Student.reg_number == reg_number,
+                Student.id != student_id
+            ).first()
+
+            if existing_reg:
+                flash(f"Registration number '{reg_number}' is already in use by another student.", "danger")
+                return render_template("edit_student.html", student=student)
+
+            student.name = name
+            student.reg_number = reg_number
+            student.student_class = student_class
+            # Add more fields as needed: student.parent_name = request.form.get("parent_name")
+            
+            db.session.commit()
+            flash(f"Student {student.name}'s details updated successfully.", "success")
+            return redirect(url_for("students"))
+
+        except Exception as e:
+            db.session.rollback()
+            # Log the error for debugging
+            print(f"Error during student edit: {e}")
+            flash("An error occurred while updating the student's details.", "danger")
+
+    return render_template("edit_student.html", student=student)
+
+
+# ---------------------------
+# SOFT DELETE STUDENT
+# ---------------------------
+@app.route("/students/delete/<int:student_id>", methods=["POST"])
+@login_required
+def delete_student(student_id):
+    school = current_school()
+    admin_user = current_user()
+    student = Student.query.filter_by(id=student_id, school_id=school.id).first_or_404()
+
+    admin_password = request.form.get("admin_password") 
+    
+    # === PASSWORD VERIFICATION CHECK ===
+    if not admin_password or not check_password_hash(admin_user.password_hash, admin_password):
+        flash("Authorization Failed: Incorrect admin password. Deletion cancelled.", "danger")
+        return redirect(url_for("students"))
+
+    # If password is correct, proceed with soft deletion
+    try:
+        student_name = student.name
+        student.is_deleted = True  # Soft Delete: Set the flag
+        db.session.commit()
+        
+        flash(f"Student {student_name} has been successfully deactivated (soft-deleted). Their payment history is preserved.", "warning")
+        return redirect(url_for("students"))
+        
+    except Exception as e:
+        db.session.rollback()
+        # Log the error for debugging
+        print(f"Error during student delete: {e}")
+        flash("An error occurred while deactivating the student.", "danger")
+        return redirect(url_for("students"))
 # ---------------------------
 # API ENDPOINTS
 # ---------------------------
@@ -1399,6 +1498,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
