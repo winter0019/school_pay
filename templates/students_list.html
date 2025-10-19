@@ -5,61 +5,174 @@
 
 {% block content %}
 <div class="space-y-6">
-
-  <!-- Add Student Form -->
-  <div class="bg-white shadow rounded-lg p-6">
-    <h2 class="text-xl font-bold text-gray-700 mb-4">Add New Student</h2>
-    <form action="{{ url_for('students') }}" method="POST" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <input type="text" name="name" placeholder="Full Name"
-             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
-      <input type="text" name="reg_number" placeholder="Reg Number"
-             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
-      <input type="text" name="student_class" placeholder="Class (e.g., JSS1, SS2)"
-             class="border rounded p-2 focus:ring focus:ring-blue-200" required>
-      <div class="md:col-span-3">
-        <button type="submit"
-                class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700">
-          ➕ Add Student
-        </button>
-      </div>
-    </form>
-  </div>
-
-  <!-- Student List -->
-  <div class="bg-white shadow rounded-lg p-6">
-    <h2 class="text-xl font-bold text-gray-700 mb-4">Student List</h2>
-    {% if students %}
-      <div class="overflow-x-auto">
-        <table class="w-full border-collapse">
-          <thead>
-            <tr class="bg-gray-100 text-left">
-              <th class="p-2 border">#</th>
-              <th class="p-2 border">Name</th>
-              <th class="p-2 border">Reg Number</th>
-              <th class="p-2 border">Class</th>
-              <th class="p-2 border">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for student in students %}
-            <tr class="border-t hover:bg-gray-50">
-              <td class="p-2">{{ loop.index }}</td>
-              <td class="p-2">{{ student.name }}</td>
-              <td class="p-2">{{ student.reg_number }}</td>
-              <td class="p-2">{{ student.student_class }}</td>
-              <td class="p-2">
-                <a href="#" class="text-blue-600 hover:underline">Edit</a> |
-                <a href="#" class="text-red-600 hover:underline">Delete</a>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="text-gray-500">No students have been added yet.</p>
+    
+    {% if not trial_active %}
+    <div class="p-4 bg-red-100 border border-red-300 text-red-700 rounded-lg">
+        <p class="font-medium">
+            Subscription expired or limit reached ({{ student_count }} / {{ trial_limit }}). Please renew to add more students.
+        </p>
+    </div>
     {% endif %}
-  </div>
+
+    <div class="bg-white shadow rounded-xl p-6 border border-gray-200">
+        <h2 class="text-xl font-bold text-gray-700 mb-4">Add New Student</h2>
+        <form action="{{ url_for('students') }}" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <input type="text" name="name" placeholder="Full Name"
+                   class="border rounded-lg p-2 focus:ring focus:ring-indigo-200 focus:border-indigo-500 transition" required>
+            <input type="text" name="reg_number" placeholder="Reg Number"
+                   class="border rounded-lg p-2 focus:ring focus:ring-indigo-200 focus:border-indigo-500 transition" required>
+            <input type="text" name="student_class" placeholder="Class (e.g., JSS1, SS2)"
+                   class="border rounded-lg p-2 focus:ring focus:ring-indigo-200 focus:border-indigo-500 transition" required>
+            <div>
+                <button type="submit"
+                        class="w-full bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 disabled:opacity-50 transition"
+                        {% if not trial_active %}disabled{% endif %}>
+                    ➕ Add Student
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="bg-white shadow rounded-xl p-6 border border-gray-200">
+        <h2 class="text-xl font-bold text-gray-700 mb-4">
+            Active Student List ({{ students|length }})
+        </h2>
+        {% if students %}
+            <div class="overflow-x-auto rounded-lg border border-gray-200">
+                <table class="min-w-full divide-y divide-gray-200 text-left">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="p-3 text-sm font-semibold text-gray-600 uppercase tracking-wider">#</th>
+                            <th class="p-3 text-sm font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                            <th class="p-3 text-sm font-semibold text-gray-600 uppercase tracking-wider">Reg Number</th>
+                            <th class="p-3 text-sm font-semibold text-gray-600 uppercase tracking-wider">Class</th>
+                            <th class="p-3 text-sm font-semibold text-gray-600 uppercase tracking-wider text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for student in students %}
+                        <tr class="hover:bg-indigo-50 transition duration-100">
+                            <td class="p-3 whitespace-nowrap">{{ loop.index }}</td>
+                            <td class="p-3 whitespace-nowrap font-medium text-gray-900">{{ student.name }}</td>
+                            <td class="p-3 whitespace-nowrap text-gray-700">{{ student.reg_number }}</td>
+                            <td class="p-3 whitespace-nowrap text-gray-700">{{ student.student_class }}</td>
+                            <td class="p-3 whitespace-nowrap text-center space-x-2">
+                                <a href="{{ url_for('edit_student', student_id=student.id) }}" 
+                                   class="text-blue-600 hover:text-blue-800 font-medium transition">
+                                    Edit
+                                </a> 
+
+                                <form method="POST" action="{{ url_for('delete_student', student_id=student.id) }}" 
+                                      id="deleteForm_{{ student.id }}" 
+                                      class="inline-block"
+                                      onsubmit="return showPasswordDelete(event, '{{ student.id }}')">
+                                    
+                                    <input type="hidden" name="admin_password" id="adminPasswordDelete_{{ student.id }}">
+                                    <button type="submit" class="text-red-600 hover:text-red-800 font-medium transition" title="Soft Delete Student">
+                                        Delete
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-gray-500 p-4 border border-dashed rounded-lg text-center">No active students found.</p>
+        {% endif %}
+    </div>
 
 </div>
-{% endblock %}
+
+<div id="passwordConfirmModal" class="fixed inset-0 bg-gray-900 bg-opacity-75 overflow-y-auto h-full w-full hidden z-50 transition-opacity duration-300">
+    <div class="relative top-20 mx-auto p-8 border w-96 shadow-2xl rounded-xl bg-white transform transition-all duration-300 ease-out">
+        <div class="mt-3 text-center">
+            <svg class="mx-auto h-12 w-12 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.332 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <h3 id="modalTitle" class="text-xl leading-6 font-bold text-gray-900 mt-3">
+                Action Requires Password
+            </h3>
+            <div class="mt-4 px-1 py-3">
+                <p class="text-sm text-gray-500 mb-4">
+                    Please enter your admin password to authorize this sensitive action.
+                </p>
+                <input type="password" id="passwordInput" placeholder="Admin Password" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition shadow-sm">
+            </div>
+            
+            <input type="hidden" id="activeFormId" value="">
+            
+            <div class="items-center px-4 py-3 space-y-3">
+                <button id="confirmBtn" onclick="confirmAction()"
+                        class="px-4 py-2 bg-red-600 text-white text-base font-medium rounded-lg w-full shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-150">
+                    Confirm & Proceed
+                </button>
+                <button onclick="hideModal()"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 text-base font-medium rounded-lg w-full hover:bg-gray-300 transition duration-150">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let activeFormId = null; 
+
+    function showPasswordDelete(event, studentId) {
+        // 1. Stop the original form submission
+        event.preventDefault(); 
+        
+        // 2. Set the context and show the modal
+        activeFormId = `deleteForm_${studentId}`;
+        document.getElementById('modalTitle').textContent = `Confirm Deletion`;
+        document.getElementById('activeFormId').value = activeFormId;
+
+        document.getElementById('passwordConfirmModal').classList.remove('hidden');
+
+        // Reset and focus the password input
+        document.getElementById('passwordInput').value = '';
+        setTimeout(() => document.getElementById('passwordInput').focus(), 50);
+
+        return false; // Prevent default submit
+    }
+
+    function hideModal() {
+        document.getElementById('passwordConfirmModal').classList.add('hidden');
+        document.getElementById('passwordInput').value = ''; 
+        activeFormId = null;
+    }
+
+    function confirmAction() {
+        const password = document.getElementById('passwordInput').value;
+        const formId = document.getElementById('activeFormId').value;
+        
+        if (!password) {
+            alert("Please enter the admin password.");
+            return;
+        }
+
+        if (formId && formId.startsWith('deleteForm_')) {
+            const studentId = formId.split('_')[1];
+            const form = document.getElementById(formId);
+            
+            // 3. Populate the hidden password field within the specific delete form
+            document.getElementById(`adminPasswordDelete_${studentId}`).value = password;
+            
+            // 4. Submit the form
+            form.submit();
+        } 
+        // Note: For the 'edit' action, the form is submitted from the edit_student.html page.
+
+        hideModal();
+    }
+
+    // Optional: Allow pressing Enter in the password field to confirm
+    document.getElementById('passwordInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmAction();
+        }
+    });
+
+</script>
