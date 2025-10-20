@@ -6,20 +6,36 @@
     <title>{% block title %}SchoolPay Admin{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
-    {# --- START OF NEW COLLAPSE/EXPAND CSS --- #}
+    {# --- START OF CORRECTED COLLAPSE/EXPAND CSS --- #}
     <style>
-        /* Define the state when the sidebar is collapsed */
+        /* CRUCIAL FIX: Prevent all horizontal scrolling on mobile */
+        body {
+            overflow-x: hidden;
+        }
+
+        /* Define the state when the sidebar is collapsed (Desktop only) */
         .sidebar-collapsed #sidebar {
             width: 5rem; /* Equivalent to w-20 in Tailwind */
         }
         
         .sidebar-collapsed #main-content {
-            margin-left: 5rem; /* Offset main content by 5rem */
+            /* This margin is applied on Desktop only when collapsed */
+            margin-left: 5rem; 
         }
 
         /* Transition for the content wrapper's margin */
         #main-content {
             transition: margin-left 300ms ease-in-out;
+            /* Default Desktop margin (w-64 = 16rem) */
+            margin-left: 16rem; 
+        }
+        
+        /* FIX 1: Override default desktop margin on mobile for main content */
+        @media (max-width: 1023px) {
+            #main-content {
+                margin-left: 0; 
+                width: 100%; /* Ensure main content uses full screen width */
+            }
         }
 
         /* Hide text/labels when collapsed */
@@ -36,26 +52,36 @@
             width: auto;
         }
 
-        /* Ensure the main content starts with the correct padding for desktop */
-        #main-content {
-            margin-left: 16rem; /* Default ml-64 (16rem) */
-        }
-
         /* Override the default mobile translation on desktop if it gets applied incorrectly */
         @media (min-width: 1024px) {
             #sidebar {
-                transform: translateX(0) !important;
+                /* Ensures sidebar is visible and fixed on desktop */
+                transform: translateX(0) !important; 
+            }
+            .sidebar-collapsed #sidebar-collapse-toggle {
+                /* Flip the collapse icon when collapsed */
+                transform: rotate(180deg);
             }
         }
+        
+        /* Optional: Add transition to the collapse button icon */
+        #sidebar-collapse-toggle {
+            transition: transform 300ms ease;
+        }
     </style>
-    {# --- END OF NEW COLLAPSE/EXPAND CSS --- #}
+    {# --- END OF CORRECTED COLLAPSE/EXPAND CSS --- #}
 
 </head>
 
 <body class="bg-gray-100 font-sans antialiased">
 
-    <div id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-indigo-900 shadow-xl overflow-y-auto
-        transition-all duration-300 lg:translate-x-0">
+    <!-- 
+        Sidebar: 
+        - Default state for mobile is hidden (-translate-x-full applied by JS).
+        - Desktop state (lg:translate-x-0) ensures it's visible on large screens.
+    -->
+    <div id="sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-indigo-900 shadow-xl overflow-y-auto 
+        transition-all duration-300 -translate-x-full lg:translate-x-0">
         <div class="p-6 text-white h-full flex flex-col">
 
             <div class="text-2xl font-extrabold mb-10 border-b border-indigo-700 pb-4 flex items-center justify-between">
@@ -85,7 +111,7 @@
                     <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     <span class="sidebar-label">Fee Structure</span>
                 </a>
-           
+            
                 <a href="{{ url_for('receipt_generator_index') }}" class="flex items-center p-3 rounded-lg text-indigo-200 hover:bg-indigo-700 hover:text-white transition duration-200">
                     <svg class="w-5 h-5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
                     <span class="sidebar-label">Receipt Generator</span>
@@ -118,7 +144,7 @@
 
     <div id="sidebar-backdrop" class="fixed inset-0 bg-black opacity-50 z-30 hidden lg:hidden" onclick="toggleMobileSidebar()"></div>
 
-    <div id="main-content" class="min-h-screen">
+    <div id="main-content" class="min-h-screen w-full lg:w-auto">
         <header class="bg-white shadow-sm p-4 sticky top-0 z-10">
             <div class="flex items-center justify-between">
                 
@@ -143,6 +169,7 @@
             </div>
         </header>
 
+        {# FIX 2: Ensure padding is consistent and respects the new mobile layout #}
         <main class="p-4 sm:p-6 lg:p-8">
             {% block content %}{% endblock %}
         </main>
@@ -203,8 +230,9 @@
                 }
                 // Ensure mobile translation class is removed on desktop load
                 sidebar.classList.remove(translateClass);
+                backdrop.classList.add('hidden'); // Ensure backdrop is hidden on desktop
             } else {
-                // Mobile view: always start hidden
+                // Mobile view: always ensure sidebar starts hidden
                 sidebar.classList.add(translateClass);
                 backdrop.classList.add('hidden');
                 body.classList.remove(collapsedClass); // Prevent collapsed state on mobile
