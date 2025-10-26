@@ -6,6 +6,9 @@
     <title>{% block title %}SchoolPay Admin{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
+    <!-- FIX: Favicon added for site professionalism and to stop 404 errors -->
+    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    
     {# --- START OF CORRECTED COLLAPSE/EXPAND CSS --- #}
     <style>
         /* CRUCIAL FIX: Prevent all horizontal scrolling on mobile */
