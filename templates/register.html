@@ -1,22 +1,48 @@
 {% extends "layout.html" %}
 {% block title %}Register - SchoolPay{% endblock %}
 {% block content %}
-<div class="max-w-md mx-auto bg-white shadow rounded-xl p-6">
-  <h2 class="text-2xl font-bold mb-4 text-center">Register Your School</h2>
-  <form method="POST">
-    <div class="mb-4">
-      <label>School Name</label>
-      <input type="text" name="school_name" required class="w-full border rounded p-2 mt-1">
+<div class="max-w-md mx-auto mt-20 sm:mt-10"> 
+    
+    <!-- CONVERSION IMPROVEMENT: Onboarding Banner -->
+    <!-- This banner reassures users and highlights the immediate value (free trial) -->
+    <div class="bg-indigo-100 border-l-4 border-indigo-500 text-indigo-800 p-4 mb-6 rounded-lg shadow-md" role="alert">
+        <p class="font-bold">🎉 You're just 2 steps away!</p>
+        <p class="text-sm">Complete this form to start your **free 2-day trial** of SchoolPay!</p>
     </div>
-    <div class="mb-4">
-      <label>Email</label>
-      <input type="email" name="email" required class="w-full border rounded p-2 mt-1">
+
+    <div class="bg-white shadow-2xl rounded-xl p-6 sm:p-8">
+        <h2 class="text-2xl font-extrabold mb-6 text-center text-gray-800">Register Your School</h2>
+        
+        <form method="POST" class="space-y-5">
+            <div class="mb-4">
+                <label for="school_name" class="block text-sm font-medium text-gray-700">School Name</label>
+                <input type="text" id="school_name" name="school_name" required 
+                       class="w-full border border-gray-300 rounded-lg p-3 mt-1 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm"
+                       placeholder="e.g., St. Jude's Academy">
+            </div>
+            
+            <div class="mb-4">
+                <label for="email" class="block text-sm font-medium text-gray-700">Email (Admin)</label>
+                <input type="email" id="email" name="email" required 
+                       class="w-full border border-gray-300 rounded-lg p-3 mt-1 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm"
+                       placeholder="you@school.edu">
+            </div>
+            
+            <div class="mb-4">
+                <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                <input type="password" id="password" name="password" required 
+                       class="w-full border border-gray-300 rounded-lg p-3 mt-1 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 shadow-sm"
+                       placeholder="••••••••">
+            </div>
+            
+            <button type="submit" class="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition duration-200 shadow-lg">
+                Start Trial & Register
+            </button>
+
+            <p class="text-center text-sm text-gray-600 mt-4">
+                Already registered? <a href="{{ url_for('login') }}" class="text-indigo-600 hover:text-indigo-800 font-medium">Log in here</a>
+            </p>
+        </form>
     </div>
-    <div class="mb-4">
-      <label>Password</label>
-      <input type="password" name="password" required class="w-full border rounded p-2 mt-1">
-    </div>
-    <button class="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700">Register</button>
-  </form>
 </div>
 {% endblock %}
