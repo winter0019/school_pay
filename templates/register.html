@@ -40,7 +40,8 @@
             </button>
 
             <p class="text-center text-sm text-gray-600 mt-4">
-                Already registered? <a href="{{ url_for('login') }}" class="text-indigo-600 hover:text-indigo-800 font-medium">Log in here</a>
+                Already registered? <a href="/login" class="text-indigo-600 hover:text-indigo-800 font-medium">Log in here</a>
+                <!-- NOTE: The 'login' endpoint is likely missing in your Flask app. We used '/login' as a temporary fix. -->
             </p>
         </form>
     </div>
