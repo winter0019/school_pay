@@ -1,0 +1,24 @@
+robots.txt
+
+For more info: https://developers.google.com/search/docs/crawling-indexing/robots/intro
+
+Allow all crawlers access to all public pages
+
+User-agent: *
+Allow: /
+
+Disallow the dashboard and payment pages from being indexed (as they require login)
+
+Disallow: /dashboard
+Disallow: /pay-with-paystack-subscription
+Disallow: /paystack_callback
+Disallow: /settings
+Disallow: /students
+
+Disallow the Google verification file (it served its temporary purpose)
+
+Disallow: /google0adc23adfb8dbf1a.html
+
+Specify the location of your sitemap
+
+Sitemap: https://school-pay-9tt2.onrender.com/sitemap.xml
