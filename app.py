@@ -1513,6 +1513,14 @@ def delete_fee_structure(id):
 
     return redirect(url_for("fee_structure"))
 
+@app.route("/google0adc23adfb8dbf1a.html")
+def google_verification():
+    """
+    Route for Google Search Console site verification.
+    The content MUST match the file name and content provided by Google exactly.
+    """
+    return "google-site-verification: google0adc23adfb8dbf1a.html"
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -1520,6 +1528,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
