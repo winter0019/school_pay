@@ -6,71 +6,79 @@
     <title>{% block title %}SchoolPay Admin{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- FIX: Favicon added for site professionalism and to stop 404 errors -->
-    <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+    <!-- START: FAVICON, TOUCH ICON, AND MANIFEST LINKS (Generated for optimal UX) -->
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='favicon-16x16.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
+    <!-- Optional: Add if included in your generator's package -->
+    <link rel="mask-icon" href="{{ url_for('static', filename='safari-pinned-tab.svg') }}" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+    <!-- END: FAVICON, TOUCH ICON, AND MANIFEST LINKS -->
     
     {# --- START OF CORRECTED COLLAPSE/EXPAND CSS --- #}
     <style>
-        /* CRUCIAL FIX: Prevent all horizontal scrolling on mobile */
-        body {
-            overflow-x: hidden;
-        }
+    /* CRUCIAL FIX: Prevent all horizontal scrolling on mobile */
+    body {
+        overflow-x: hidden;
+    }
 
-        /* Define the state when the sidebar is collapsed (Desktop only) */
-        .sidebar-collapsed #sidebar {
-            width: 5rem; /* Equivalent to w-20 in Tailwind */
-        }
-        
-        .sidebar-collapsed #main-content {
-            /* This margin is applied on Desktop only when collapsed */
-            margin-left: 5rem; 
-        }
+    /* Define the state when the sidebar is collapsed (Desktop only) */
+    .sidebar-collapsed #sidebar {
+        width: 5rem; /* Equivalent to w-20 in Tailwind */
+    }
+    
+    .sidebar-collapsed #main-content {
+        /* This margin is applied on Desktop only when collapsed */
+        margin-left: 5rem; 
+    }
 
-        /* Transition for the content wrapper's margin */
+    /* Transition for the content wrapper's margin */
+    #main-content {
+        transition: margin-left 300ms ease-in-out;
+        /* Default Desktop margin (w-64 = 16rem) */
+        margin-left: 16rem; 
+    }
+    
+    /* FIX 1: Override default desktop margin on mobile for main content */
+    @media (max-width: 1023px) {
         #main-content {
-            transition: margin-left 300ms ease-in-out;
-            /* Default Desktop margin (w-64 = 16rem) */
-            margin-left: 16rem; 
+            margin-left: 0; 
+            width: 100%; /* Ensure main content uses full screen width */
         }
-        
-        /* FIX 1: Override default desktop margin on mobile for main content */
-        @media (max-width: 1023px) {
-            #main-content {
-                margin-left: 0; 
-                width: 100%; /* Ensure main content uses full screen width */
-            }
-        }
+    }
 
-        /* Hide text/labels when collapsed */
-        .sidebar-collapsed .sidebar-label {
-            opacity: 0;
-            width: 0;
-            overflow: hidden;
-            transition: opacity 200ms ease, width 300ms ease;
-        }
+    /* Hide text/labels when collapsed */
+    .sidebar-collapsed .sidebar-label {
+        opacity: 0;
+        width: 0;
+        overflow: hidden;
+        transition: opacity 200ms ease, width 300ms ease;
+    }
 
-        /* Ensure icon remains visible when collapsed */
-        #sidebar .sidebar-label {
-            opacity: 1;
-            width: auto;
-        }
+    /* Ensure icon remains visible when collapsed */
+    #sidebar .sidebar-label {
+        opacity: 1;
+        width: auto;
+    }
 
-        /* Override the default mobile translation on desktop if it gets applied incorrectly */
-        @media (min-width: 1024px) {
-            #sidebar {
-                /* Ensures sidebar is visible and fixed on desktop */
-                transform: translateX(0) !important; 
-            }
-            .sidebar-collapsed #sidebar-collapse-toggle {
-                /* Flip the collapse icon when collapsed */
-                transform: rotate(180deg);
-            }
+    /* Override the default mobile translation on desktop if it gets applied incorrectly */
+    @media (min-width: 1024px) {
+        #sidebar {
+            /* Ensures sidebar is visible and fixed on desktop */
+            transform: translateX(0) !important; 
         }
-        
-        /* Optional: Add transition to the collapse button icon */
-        #sidebar-collapse-toggle {
-            transition: transform 300ms ease;
+        .sidebar-collapsed #sidebar-collapse-toggle {
+            /* Flip the collapse icon when collapsed */
+            transform: rotate(180deg);
         }
+    }
+    
+    /* Optional: Add transition to the collapse button icon */
+    #sidebar-collapse-toggle {
+        transition: transform 300ms ease;
+    }
     </style>
     {# --- END OF CORRECTED COLLAPSE/EXPAND CSS --- #}
 
@@ -216,7 +224,7 @@
         }
         // Bind the desktop toggle function to the header button as well (to match the icon)
         if (desktopToggle) {
-             desktopToggle.addEventListener('click', toggleDesktopSidebar);
+            desktopToggle.addEventListener('click', toggleDesktopSidebar);
         }
 
         // --- 3. Persistence and Initialization ---
