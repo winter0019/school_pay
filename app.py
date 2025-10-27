@@ -1521,6 +1521,53 @@ def google_verification():
     """
     return "google-site-verification: google0adc23adfb8dbf1a.html"
 
+# ---------------------------
+# SITEMAP GENERATION
+# ---------------------------
+@app.route("/sitemap.xml", methods=["GET"])
+def sitemap():
+    """
+    Dynamically generates the sitemap.xml file based on known public routes.
+    """
+    # Base URL for the site (change this if your domain changes)
+    base_url = "https://school-pay-9tt2.onrender.com"
+    
+    # 1. Define the public routes and their priority/frequency
+    # We only include pages that a non-logged-in user can access.
+    urls = [
+        # loc, lastmod (optional), changefreq, priority
+        {"loc": "/", "changefreq": "always", "priority": "1.0"},
+        {"loc": "/register", "changefreq": "monthly", "priority": "0.8"},
+        {"loc": "/receipt_generator_index", "changefreq": "weekly", "priority": "0.7"},
+        # Note: Dynamic routes like /generate_receipt should NOT be listed here.
+        # Private routes like /dashboard should be excluded.
+    ]
+
+    # 2. Start building the XML string
+    xml_template = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{urls}
+</urlset>"""
+    
+    url_tags = ""
+    for url in urls:
+        # Construct the <url> block for each public page
+        url_tags += f"""
+    <url>
+        <loc>{base_url}{url['loc']}</loc>
+        <changefreq>{url['changefreq']}</changefreq>
+        <priority>{url['priority']}</priority>
+    </url>"""
+
+    # 3. Insert the constructed URL blocks into the main template
+    sitemap_xml = xml_template.format(urls=url_tags)
+
+    # 4. Create and return the response with the correct MIME type
+    response = make_response(sitemap_xml)
+    response.headers["Content-Type"] = "application/xml"
+    return response
+
+
 
 if __name__ == "__main__":
     with app.app_context():
@@ -1528,6 +1575,7 @@ if __name__ == "__main__":
         # db.create_all()
         pass
     app.run(debug=True)
+
 
 
 
