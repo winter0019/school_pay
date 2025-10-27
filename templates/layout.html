@@ -4,6 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}SchoolPay Admin{% endblock %}</title>
+    
+    <!-- START: GOOGLE ANALYTICS (GA4) IMPLEMENTATION -->
+    <!-- Global Site Tag (gtag.js) - Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-2T4RYLZ5F7"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-2T4RYLZ5F7');
+    </script>
+    {% block google_analytics_tag %}{% endblock %}
+    <!-- END: GOOGLE ANALYTICS (GA4) IMPLEMENTATION -->
+
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- START: FAVICON, TOUCH ICON, AND MANIFEST LINKS (Generated for optimal UX) -->
