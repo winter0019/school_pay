@@ -1,0 +1,48 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ============================
+    // HELPER FUNCTIONS
+    // ============================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUnderMaxSize(maxMegabytes) {
+      return request.resource.size < maxMegabytes * 1024 * 1024;
+    }
+
+    // ============================
+    // CHAT ATTACHMENTS
+    // Path: /chat_attachments/{conversationId}/{fileName}
+    // Handles: Images, Videos, Documents, Voice Notes
+    // ============================
+    match /chat_attachments/{conversationId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isUnderMaxSize(25);
+      allow delete: if false;
+    }
+
+    // ============================
+    // USER AVATARS & PROFILES
+    // Path: /avatars/{userId}/{fileName}
+    // ============================
+    match /avatars/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() 
+        && request.auth.uid == userId 
+        && request.resource.contentType.matches('image/.*')
+        && isUnderMaxSize(5);
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ============================
+    // DENY EVERYTHING ELSE BY DEFAULT
+    // ============================
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
