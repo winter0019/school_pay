@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import AppLayout from '@/components/layout/AppLayout';
-import './globals.css'; // Relative import to app/globals.css
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'CircleAI - Peer Support Circles',
+  title: 'smartC - Peer Platform',
   description: 'Connect with people who truly understand.',
 };
 
@@ -13,8 +13,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500 selection:text-white">
+    <html lang="en" className="dark">
+      <body className="bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500 selection:text-white min-h-screen">
         <AppLayout>{children}</AppLayout>
       </body>
     </html>
