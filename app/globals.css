@@ -1,15 +1,36 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #111827;
+/* Base body dark layout defaults */
+body {
+  color: #f8fafc;
+  background-color: #020617;
+  min-height: 100vh;
 }
 
-html,
-body {
-  background: var(--background);
-  color: var(--foreground);
-  margin: 0;
-  padding: 0;
-  min-height: 100%;
+/* Force high-contrast text on all inputs, textareas, and select elements */
+input,
+textarea,
+select {
+  color: #0f172a !important;
+  background-color: #ffffff !important;
+}
+
+/* Dark mode & dark container input overrides */
+.dark input,
+.dark textarea,
+.dark select,
+.bg-slate-900 input,
+.bg-slate-900 textarea,
+.bg-slate-950 input,
+.bg-slate-950 textarea {
+  color: #f8fafc !important;
+  background-color: #0f172a !important;
+}
+
+/* Fix invisible placeholder text */
+::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
 }
