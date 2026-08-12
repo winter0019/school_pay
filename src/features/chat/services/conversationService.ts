@@ -21,6 +21,33 @@ export interface ConversationData {
   [key: string]: any;
 }
 
+/**
+ * Checks if a direct chat between currentUid and targetUid is allowed.
+ * Requires an active accepted friend status document in `/friends/{pairKey}`
+ */
+export async function canStartDirectChat(
+  currentUid: string,
+  targetUid: string
+): Promise<{ allowed: boolean; reason?: string }> {
+  if (!currentUid || !targetUid || currentUid === targetUid) {
+    return { allowed: false, reason: "Invalid participants." };
+  }
+
+  // Create a deterministic pair key (e.g. uidA_uidB sorted alphabetically)
+  const pairKey = [currentUid, targetUid].sort().join("_");
+  const friendRef = doc(db, "friends", pairKey);
+  const friendSnap = await getDoc(friendRef);
+
+  if (!friendSnap.exists() || friendSnap.data()?.status !== "accepted") {
+    return {
+      allowed: false,
+      reason: "You must send a friend request and have it accepted before starting a direct chat.",
+    };
+  }
+
+  return { allowed: true };
+}
+
 export async function getConversation(
   conversationId: string
 ): Promise<ConversationData> {
@@ -61,6 +88,12 @@ export async function getFriendProfile(
     throw new Error("Friend not found");
   }
 
+  // Verify friendship status before returning profile details
+  const friendCheck = await canStartDirectChat(currentUid, friendUid);
+  if (!friendCheck.allowed) {
+    throw new Error(friendCheck.reason || "Direct messaging is restricted until friend request is accepted.");
+  }
+
   const userSnap = await getDoc(
     doc(db, "users", friendUid)
   );
@@ -84,5 +117,7 @@ export async function getFriendProfile(
     online: user.online ?? false,
 
     lastSeen: user.lastSeen ?? null,
+
+    isFriend: true,
   };
 }
