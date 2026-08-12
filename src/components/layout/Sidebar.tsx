@@ -58,7 +58,7 @@ export default function Sidebar({
   return (
     <>
       {/* Mobile Top Header */}
-      <div className="fixed left-0 right-0 top-0 z-30 flex h-16 items-center justify-between border-b border-slate-800/80 bg-slate-950/90 px-4 backdrop-blur-md md:hidden">
+      <div className="fixed left-0 right-0 top-0 z-40 flex h-16 items-center justify-between border-b border-slate-800/80 bg-slate-950/90 px-4 backdrop-blur-md md:hidden">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 font-bold text-white shadow-lg shadow-indigo-500/20">
             S
@@ -86,11 +86,11 @@ export default function Sidebar({
 
       {/* Persistent Sidebar Drawer */}
       <aside
-        className={`fixed bottom-0 left-0 top-0 z-50 flex flex-col border-r border-slate-800/80 bg-[#070913] p-4 transition-all duration-300 w-64 ${
+        className={`fixed bottom-0 left-0 top-0 z-50 flex flex-col border-r border-slate-800/80 bg-[#070913] p-4 transition-transform duration-300 ease-in-out w-64 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         } md:static md:translate-x-0 ${
           isCollapsed ? "md:w-20" : "md:w-64"
-        }`}
+        } shrink-0`}
       >
         {/* Brand Header */}
         <div className="mb-6 flex items-center justify-between px-2 py-1">

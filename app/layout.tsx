@@ -30,19 +30,15 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="min-h-screen bg-[#020617] text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
         <div className="flex min-h-screen w-full overflow-x-hidden">
-          {/* Root Sidebar (Rendered ONCE globally) */}
+          {/* Persistent Sidebar */}
           <Sidebar
             isCollapsed={isCollapsed}
             onToggleCollapse={handleToggleCollapse}
           />
 
-          {/* Main Application Content Area */}
-          <main
-            className={`flex-1 min-w-0 transition-all duration-300 ease-in-out pt-20 md:pt-6 px-4 sm:px-6 md:px-8 pb-16 ${
-              isCollapsed ? 'md:ml-20' : 'md:ml-64'
-            }`}
-          >
-            <div className="mx-auto w-full max-w-7xl">
+          {/* Fluid Main Content Area */}
+          <main className="flex-1 flex flex-col min-w-0 pt-16 md:pt-0 overflow-y-auto">
+            <div className="flex-1 w-full p-4 sm:p-6 md:p-8">
               {children}
             </div>
           </main>
