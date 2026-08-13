@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '@/firebase/config';
 import {
   Sparkles,
   MessageSquare,
@@ -28,8 +29,7 @@ export default function DashboardHome() {
       setGreeting('Good Evening');
     }
 
-    // 2. Fetch authenticated user profile details from Firebase
-    const auth = getAuth();
+    // 2. Fetch authenticated user profile details from Firebase using centralized auth
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         const name = user.displayName || user.email?.split('@')[0] || 'Peer Member';
