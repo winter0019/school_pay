@@ -211,7 +211,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <button
-              onClick={() => router.push('/chats')}
+              onClick={() => router.push('/conversations/direct')}
               className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition border border-slate-700 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />

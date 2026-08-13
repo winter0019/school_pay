@@ -130,7 +130,7 @@ export default function DirectChatsPage() {
   const handleAcceptRequest = async (senderUid: string, senderName: string) => {
     if (!currentUser) return;
     try {
-      // Create friendship doc
+      // Create friendship doc with participant array mapping for rule evaluation
       await addDoc(collection(db, 'friends'), {
         users: [currentUser.uid, senderUid],
         createdAt: serverTimestamp(),
