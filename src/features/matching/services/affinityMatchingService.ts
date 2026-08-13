@@ -128,11 +128,15 @@ export async function findDeepAffinityMatch(topic: string, language: string = 'e
 
       const affinityPercentage = Math.round(highestAffinity * 100);
       const sharedLens = bestCluster[0].philosophicalLens;
+      
+      // Use the actual original display title passed into the function or fallback nicely
+      const displayTopicTitle = topic; 
+
       const initialPrompt = `Welcome to your ${affinityPercentage}% Affinity Circle! You share a ${sharedLens.toUpperCase()} perspective. Take 1 minute each to share what brought you to this conversation today.`;
 
       await setDoc(doc(db, 'rooms', roomId), {
         roomId,
-        topic: normalizedTopic,
+        topic: displayTopicTitle, // <-- Retains clean display formatting (e.g. "Mental Wellness & Stress")
         memberUids,
         memberNames,
         affinityScore: affinityPercentage,

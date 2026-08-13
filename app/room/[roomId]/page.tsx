@@ -2,7 +2,7 @@
 
 import React, { use, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, updateDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
 import {
@@ -25,7 +25,8 @@ import { AI_VOICES, speakWithNamedVoice, stopNamedVoice } from '@/features/audio
 import { generateCircleDeepResearch, SmartSolutionsSummary } from '@/features/research/services/deepResearchService';
 
 export default function RoomPage({ params }: { params: Promise<{ roomId: string }> }) {
-  const { roomId } = use(params);
+  const resolvedParams = use(params);
+  const roomId = resolvedParams?.roomId;
   const router = useRouter();
 
   const [roomData, setRoomData] = useState<any>(null);
@@ -33,12 +34,10 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [text, setText] = useState('');
   const [remainingSeconds, setRemainingSeconds] = useState(1800);
 
-  // Selected AI Voice Host (Hiba | Adal | Batool)
   const [selectedVoiceId, setSelectedVoiceId] = useState<'hiba' | 'adal' | 'batool'>('hiba');
   const [isSpeakMode, setIsSpeakMode] = useState<boolean>(true);
   const [isPlayingVoice, setIsPlayingVoice] = useState<boolean>(false);
 
-  // Premium Smart Suggestions Summary State
   const [isGeneratingSummary, setIsGeneratingSummary] = useState<boolean>(false);
   const [summaryReport, setSummaryReport] = useState<SmartSolutionsSummary | null>(null);
 
@@ -77,6 +76,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           setRemainingSeconds(diffSecs);
         }
       }
+    }, (err) => {
+      console.warn('Room listener permission or network notice:', err);
     });
 
     const messagesRef = collection(db, 'rooms', roomId, 'messages');
@@ -88,6 +89,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       });
       setMessages(list);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }, (err) => {
+      console.warn('Messages listener notice:', err);
     });
 
     return () => {
@@ -99,7 +102,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const handleSpeakText = (script: string) => {
     if (!isSpeakMode) return;
-
     setIsPlayingVoice(true);
     speakWithNamedVoice(script, selectedVoiceId, () => {
       setIsPlayingVoice(false);
@@ -111,12 +113,25 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     setIsPlayingVoice(false);
   };
 
-  const handleExitCircle = () => {
+  const handleExitCircle = async () => {
     stopNamedVoice();
+    
+    try {
+      if (roomId) {
+        const roomRef = doc(db, 'rooms', roomId);
+        await updateDoc(roomRef, { status: 'completed' });
+      }
+
+      if (currentUser.uid && currentUser.uid !== 'guest_user') {
+        await deleteDoc(doc(db, 'queue', currentUser.uid));
+      }
+    } catch (err) {
+      console.warn('Exit cleanup notice:', err);
+    }
+
     router.push(`/feedback?roomId=${roomId}`);
   };
 
-  // Generate Smart Suggestions & Possible Solutions Summary
   const handleGenerateSummary = async () => {
     if (!roomId || messages.length === 0) return;
     setIsGeneratingSummary(true);
@@ -142,33 +157,37 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
     const modResult = checkMessageContent(rawText);
 
-    await addDoc(collection(db, 'rooms', roomId, 'messages'), {
-      roomId,
-      senderUid: currentUser.uid,
-      senderName: currentUser.displayName,
-      text: modResult.cleanText,
-      isFlagged: modResult.isFlagged,
-      createdAt: serverTimestamp(),
-    });
-
-    if (modResult.isFlagged) {
+    try {
       await addDoc(collection(db, 'rooms', roomId, 'messages'), {
         roomId,
-        senderUid: 'system_ai_moderator',
-        senderName: 'AI Safety System',
-        text: `Reminder: Please keep the conversation respectful and constructive.`,
-        type: 'system_warning',
+        senderUid: currentUser.uid,
+        senderName: currentUser.displayName,
+        text: modResult.cleanText,
+        isFlagged: modResult.isFlagged,
         createdAt: serverTimestamp(),
       });
 
-      await logModerationViolation({
-        roomId,
-        flaggedUserUid: currentUser.uid,
-        flaggedUserName: currentUser.displayName,
-        originalText: rawText,
-        reason: modResult.reason || 'Flagged for explicit wording.',
-        severity: modResult.severity || 'medium',
-      });
+      if (modResult.isFlagged) {
+        await addDoc(collection(db, 'rooms', roomId, 'messages'), {
+          roomId,
+          senderUid: 'system_ai_moderator',
+          senderName: 'AI Safety System',
+          text: `Reminder: Please keep the conversation respectful and constructive.`,
+          type: 'system_warning',
+          createdAt: serverTimestamp(),
+        });
+
+        await logModerationViolation({
+          roomId,
+          flaggedUserUid: currentUser.uid,
+          flaggedUserName: currentUser.displayName,
+          originalText: rawText,
+          reason: modResult.reason || 'Flagged for explicit wording.',
+          severity: modResult.severity || 'medium',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to send message or save session memory:', err);
     }
   };
 
@@ -182,7 +201,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   return (
     <main className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
-      {/* HEADER WITH AI VOICE SELECTOR AND EXIT BUTTON */}
       <header className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 z-10 flex-shrink-0">
         <div>
           <h2 className="font-bold text-white text-sm sm:text-base capitalize flex items-center gap-2">
@@ -195,7 +213,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* AI VOICE SELECTOR */}
           <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             {(['hiba', 'adal', 'batool'] as const).map((vId) => (
               <button
@@ -212,7 +229,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             ))}
           </div>
 
-          {/* SPEAK MODE TOGGLE */}
           <button
             onClick={() => {
               if (isPlayingVoice) handleStopVoice();
@@ -228,13 +244,11 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             <span className="hidden sm:inline">{isSpeakMode ? 'Speak Mode ON' : 'Mute Voice'}</span>
           </button>
 
-          {/* TIMER */}
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-mono font-bold">
             <Clock className="w-3.5 h-3.5" />
             <span>{formatCountdown(remainingSeconds)}</span>
           </div>
 
-          {/* EXIT CIRCLE BUTTON */}
           <button
             onClick={handleExitCircle}
             className="px-3 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 border border-rose-500/30 text-rose-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
@@ -246,7 +260,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
       </header>
 
-      {/* AI HOST BANNER */}
       <div className="bg-indigo-600/15 border-b border-indigo-500/30 p-3 text-xs text-indigo-300 flex items-center justify-between gap-3 z-10">
         <div className="flex items-center gap-2.5 min-w-0">
           <Sparkles className={`w-4 h-4 text-indigo-400 flex-shrink-0 ${isPlayingVoice ? 'animate-bounce' : ''}`} />
@@ -277,7 +290,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </button>
           )}
 
-          {/* PREMIUM SMART SUGGESTIONS & SOLUTIONS BUTTON */}
           <button
             onClick={handleGenerateSummary}
             disabled={isGeneratingSummary}
@@ -289,7 +301,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
       </div>
 
-      {/* PREMIUM SMART SUGGESTIONS & SOLUTIONS CARD */}
       {summaryReport && (
         <div className="m-4 p-5 rounded-2xl bg-slate-900 border border-amber-500/40 text-xs space-y-4 shadow-2xl relative animate-fade-in">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -303,7 +314,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* SMART SUGGESTIONS */}
             <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2">
               <h4 className="font-bold text-indigo-300 text-xs flex items-center gap-1.5 uppercase tracking-wider">
                 <Sparkle className="w-3.5 h-3.5 text-indigo-400" /> Smart Suggestions
@@ -318,7 +328,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
               </ul>
             </div>
 
-            {/* POSSIBLE SOLUTIONS */}
             <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2">
               <h4 className="font-bold text-emerald-300 text-xs flex items-center gap-1.5 uppercase tracking-wider">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Possible Solutions
@@ -336,7 +345,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
       )}
 
-      {/* MESSAGES FEED */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((m) => {
           if (m.type === 'system_warning' || m.senderUid === 'system_ai_moderator') {
@@ -377,7 +385,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* COMPOSER */}
       <footer className="p-3 bg-slate-900 border-t border-slate-800">
         <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-4xl mx-auto">
           <input

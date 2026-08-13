@@ -207,11 +207,11 @@ export default function DashboardPage() {
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-white">Private Conversations</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Stay connected 1-on-1 with peers you've met in past circles.
+                Stay connected 1-on-1 with peers you've met in past circles (friend request required).
               </p>
             </div>
             <button
-              onClick={() => router.push('/conversations/direct')}
+              onClick={() => router.push('/chats')}
               className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition border border-slate-700 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />

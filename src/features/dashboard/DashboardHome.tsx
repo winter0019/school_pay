@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import {
   Sparkles,
   MessageSquare,
@@ -13,6 +14,32 @@ import {
 } from 'lucide-react';
 
 export default function DashboardHome() {
+  const [displayName, setDisplayName] = useState<string>('Peer Member');
+  const [greeting, setGreeting] = useState<string>('Good Morning');
+
+  useEffect(() => {
+    // 1. Calculate dynamic greeting based on local time
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      setGreeting('Good Morning');
+    } else if (hour < 18) {
+      setGreeting('Good Afternoon');
+    } else {
+      setGreeting('Good Evening');
+    }
+
+    // 2. Fetch authenticated user profile details from Firebase
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const name = user.displayName || user.email?.split('@')[0] || 'Peer Member';
+        setDisplayName(name);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   return (
     <div className="space-y-8 p-4 sm:p-8 max-w-7xl mx-auto">
       {/* WELCOME BANNER */}
@@ -24,7 +51,7 @@ export default function DashboardHome() {
             Online
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-white">
-            Good Evening, <span className="text-indigo-400">winter0019</span> 👋
+            {greeting}, <span className="text-indigo-400">{displayName}</span> 👋
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm max-w-xl">
             Welcome back to ConversationOS. Your AI companion is ready to help you discover meaningful conversations around the world.

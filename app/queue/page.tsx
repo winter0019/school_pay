@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, onSnapshot, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, query, where, getDocs, serverTimestamp, collection, addDb, addDoc } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { findDeepAffinityMatch } from '@/features/matching/services/affinityMatchingService';
 import { PREDEFINED_TOPICS, generateGuestPseudonym } from '@/features/topics/data/predefinedTopics';
@@ -62,19 +62,22 @@ export default function QueuePage() {
     const selectedTopic = PREDEFINED_TOPICS.find((t) => t.id === selectedTopicId);
     const topicName = selectedTopic ? selectedTopic.title : 'General';
 
-    // 1. Submit queue document to Firestore
-    await setDoc(doc(db, 'queue', userId), {
-      userId,
-      userName: pseudonym,
-      topic: topicName.toLowerCase().trim(),
-      philosophicalLens,
-      goal: 'perspective',
-      language: 'en',
-      status: 'waiting',
-      joinedAt: serverTimestamp(),
-    });
+    try {
+      // 1. Submit queue document
+      await setDoc(doc(db, 'queue', userId), {
+        userId,
+        userName: pseudonym,
+        topic: topicName.toLowerCase().trim(),
+        philosophicalLens,
+        goal: 'perspective',
+        language: 'en',
+        status: 'waiting',
+        joinedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Queue write error:', e);
+    }
 
-    // 2. Real-time check: Check if another peer already created a room containing this user
     const checkMatchedRoom = async () => {
       try {
         const roomsQuery = query(
@@ -88,34 +91,51 @@ export default function QueuePage() {
           return matchedDoc.data().roomId || matchedDoc.id;
         }
       } catch (e) {
-        console.warn('Room check non-fatal:', e);
+        console.warn('Room check error:', e);
       }
       return null;
     };
 
-    // 3. Polling loop with dual check (Try to create match OR join existing created room)
+    // 2. Polling Loop with Safety Fallback
+    let attempts = 0;
     const interval = setInterval(async () => {
-      // First, check if a peer already matched us and created a room
-      const existingRoomId = await checkMatchedRoom();
-      if (existingRoomId) {
-        clearInterval(interval);
-        router.push(`/room/${existingRoomId}`);
-        return;
-      }
+      attempts++;
+      try {
+        const existingRoomId = await checkMatchedRoom();
+        if (existingRoomId) {
+          clearInterval(interval);
+          router.push(`/room/${existingRoomId}`);
+          return;
+        }
 
-      // Otherwise, attempt to trigger local matching
-      const createdRoomId = await findDeepAffinityMatch(topicName, 'en');
-      if (createdRoomId) {
-        clearInterval(interval);
-        router.push(`/room/${createdRoomId}`);
+        const createdRoomId = await findDeepAffinityMatch(topicName, 'en');
+        if (createdRoomId) {
+          clearInterval(interval);
+          router.push(`/room/${createdRoomId}`);
+          return;
+        }
+
+        // Fallback: If matching takes too long (> 12 seconds), auto-create a room so user is never stuck
+        if (attempts >= 5) {
+          clearInterval(interval);
+          const fallbackRef = await addDoc(collection(db, 'rooms'), {
+            topic: topicName,
+            memberUids: [userId],
+            status: 'active',
+            createdAt: serverTimestamp(),
+          });
+          router.push(`/room/${fallbackRef.id}`);
+        }
+      } catch (err) {
+        console.warn('Polling iteration error:', err);
       }
     }, 2500);
 
-    // Timeout safety after 45 seconds
+    // Timeout safety after 30 seconds
     setTimeout(() => {
       clearInterval(interval);
       setIsSearching(false);
-    }, 45000);
+    }, 30000);
   };
 
   const activeTopicObj = PREDEFINED_TOPICS.find((t) => t.id === selectedTopicId);
@@ -143,7 +163,6 @@ export default function QueuePage() {
           </div>
         ) : (
           <div className="space-y-8">
-            {/* 1. GUEST PSEUDONYM GENERATOR */}
             <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 space-y-2">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
@@ -171,7 +190,6 @@ export default function QueuePage() {
               </div>
             </div>
 
-            {/* 2. TOPICS GRID */}
             <div className="space-y-3">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
                 Choose a Predefined Circle Focus (12 Available)
@@ -207,7 +225,6 @@ export default function QueuePage() {
               </div>
             </div>
 
-            {/* 3. PHILOSOPHICAL LENS */}
             <div className="space-y-3">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <Brain className="w-3.5 h-3.5 text-indigo-400" /> Philosophical Mindset / Worldview
@@ -231,7 +248,6 @@ export default function QueuePage() {
               </div>
             </div>
 
-            {/* JOIN BUTTON */}
             <button
               onClick={handleJoinQueue}
               className="w-full py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2"

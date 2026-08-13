@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+// Uncomment if using Firebase Auth:
+// import { getAuth, signOut } from "firebase/auth";
 
 interface SidebarProps {
   isCollapsed?: boolean;
@@ -14,7 +16,24 @@ export default function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleSignOut = async () => {
+    try {
+      // If using Firebase:
+      // const auth = getAuth();
+      // await signOut(auth);
+
+      // Clear local storage / tokens if any:
+      localStorage.removeItem("smartc_sidebar_collapsed");
+      
+      // Redirect to login or home
+      router.push("/");
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
 
   const navItems = [
     {
@@ -151,9 +170,9 @@ export default function Sidebar({
           })}
         </nav>
 
-        {/* Footer Profile / Branding */}
+        {/* Footer Profile & Sign Out Button */}
         {!isCollapsed && (
-          <div className="mt-auto border-t border-slate-800/80 pt-4 px-1">
+          <div className="mt-auto border-t border-slate-800/80 pt-4 px-1 space-y-3">
             <div className="flex items-center gap-3 rounded-xl bg-slate-900/40 p-2.5 border border-slate-800/50">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-950 border border-indigo-500/30 text-indigo-300 font-semibold text-xs">
                 N
@@ -163,6 +182,17 @@ export default function Sidebar({
                 <p className="truncate text-[10px] text-slate-500">Connect • Collaborate</p>
               </div>
             </div>
+
+            <button
+              onClick={handleSignOut}
+              type="button"
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 hover:text-red-300"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              Sign Out
+            </button>
           </div>
         )}
       </aside>
