@@ -3,7 +3,8 @@
 import React, { use, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { doc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, updateDoc, deleteDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '@/firebase/config';
 import { db } from '@/firebase/firestore';
 import {
   Sparkles,
@@ -48,8 +49,8 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // 1. Centralized Auth State
   useEffect(() => {
-    const auth = getAuth();
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser({
@@ -61,6 +62,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => unsub();
   }, []);
 
+  // 2. Real-time Room & Messages Listeners
   useEffect(() => {
     if (!roomId) return;
 
@@ -70,14 +72,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const data = snap.data();
         setRoomData(data);
 
-        if (data.endTime) {
-          const endMs = data.endTime.seconds ? data.endTime.seconds * 1000 : new Date(data.endTime).getTime();
-          const diffSecs = Math.max(0, Math.floor((endMs - Date.now()) / 1000));
-          setRemainingSeconds(diffSecs);
+        // Real-time Countdown calculation based on createdAt or endTime
+        if (data.createdAt) {
+          const createdMs = data.createdAt.seconds ? data.createdAt.seconds * 1000 : new Date(data.createdAt).getTime();
+          const elapsedSecs = Math.floor((Date.now() - createdMs) / 1000);
+          const totalDuration = 1800; // 30 minutes
+          setRemainingSeconds(Math.max(0, totalDuration - elapsedSecs));
         }
       }
     }, (err) => {
-      console.warn('Room listener permission or network notice:', err);
+      console.error('Room listener error:', err);
     });
 
     const messagesRef = collection(db, 'rooms', roomId, 'messages');
@@ -90,7 +94,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       setMessages(list);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     }, (err) => {
-      console.warn('Messages listener notice:', err);
+      console.error('Messages listener error:', err);
     });
 
     return () => {
@@ -99,6 +103,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       stopNamedVoice();
     };
   }, [roomId]);
+
+  // Fallback real-time interval timer for smooth countdown UI updates
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleSpeakText = (script: string) => {
     if (!isSpeakMode) return;
@@ -115,7 +127,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const handleExitCircle = async () => {
     stopNamedVoice();
-    
     try {
       if (roomId) {
         const roomRef = doc(db, 'rooms', roomId);
