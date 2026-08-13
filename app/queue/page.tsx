@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, query, where, getDocs, serverTimestamp, collection, addDb, addDoc } from 'firebase/firestore';
+import { doc, setDoc, query, where, getDocs, serverTimestamp, collection, addDoc } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { findDeepAffinityMatch } from '@/features/matching/services/affinityMatchingService';
 import { PREDEFINED_TOPICS, generateGuestPseudonym } from '@/features/topics/data/predefinedTopics';
