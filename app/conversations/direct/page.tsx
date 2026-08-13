@@ -33,6 +33,33 @@ export default function DirectChatsPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Audio notification helper using Web Audio API
+  const playNotificationSound = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 note
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5 note
+
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (err) {
+      console.warn('Audio play blocked or unsupported:', err);
+    }
+  };
+
   // 1. Authenticated User Observer
   useEffect(() => {
     const auth = getAuth();
@@ -48,6 +75,36 @@ export default function DirectChatsPage() {
     });
     return () => unsub();
   }, []);
+
+  // Real-time listener for incoming friend requests with sound notifications
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    const q = query(
+      collection(db, 'friend_requests'),
+      where('receiverUid', '==', currentUser.uid),
+      where('status', '==', 'pending')
+    );
+
+    let isInitialLoad = true;
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      if (isInitialLoad) {
+        isInitialLoad = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          playNotificationSound();
+          const data = change.doc.data();
+          setFriendships((prev) => ({ ...prev, [data.senderUid]: 'pending_received' }));
+        }
+      });
+    });
+
+    return () => unsub();
+  }, [currentUser]);
 
   // 2. Fetch users and relationship statuses
   const fetchPeersAndRelationships = async (myUid: string) => {
@@ -177,16 +234,31 @@ export default function DirectChatsPage() {
     ).catch((err) => console.warn('Conversation init non-fatal:', err));
   }, [currentUser, activePeer]);
 
-  // 6. Subscribe to messages for the active conversation
+  // 6. Subscribe to messages for the active conversation with sound notifications
   useEffect(() => {
     if (!conversationId || !currentUser?.uid) return;
 
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
+    let isInitialMessagesLoad = true;
+
     const unsub = onSnapshot(
       q,
       (snapshot) => {
+        if (isInitialMessagesLoad) {
+          isInitialMessagesLoad = false;
+        } else {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              if (data.senderUid !== currentUser?.uid) {
+                playNotificationSound();
+              }
+            }
+          });
+        }
+
         const list: any[] = [];
         snapshot.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...docSnap.data() });
