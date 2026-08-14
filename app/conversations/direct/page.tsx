@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
-import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock } from 'lucide-react';
+import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 export default function DirectChatsPage() {
   const router = useRouter();
@@ -30,10 +30,18 @@ export default function DirectChatsPage() {
   const [conversationId, setConversationId] = useState<string>('');
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
+  const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Audio notification helper using Web Audio API
+  const emojiCategories = {
+    Smileys: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛'],
+    Gestures: ['👍', '👎', '👊', '✊', '🤛', '🤜', '🤞', '✌️', '🤟', '🤘', '👌', '🤌', '🤏', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚'],
+    Hearts: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❤️‍🔥', '❤️‍🩹', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟'],
+    Objects: ['💻', '📱', '⚡', '🔥', '✨', '💡', '🚀', '🎉', '🏆', '🎯', '📌', '📎', '🔑', '🔒', '🔔', '💬', '📢', '⭐', '🌟', '💥']
+  };
+
   const playNotificationSound = () => {
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -44,8 +52,8 @@ export default function DirectChatsPage() {
       const gain = ctx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5 note
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5 note
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
 
       gain.gain.setValueAtTime(0.1, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
@@ -60,7 +68,6 @@ export default function DirectChatsPage() {
     }
   };
 
-  // 1. Authenticated User Observer
   useEffect(() => {
     const auth = getAuth();
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -76,7 +83,6 @@ export default function DirectChatsPage() {
     return () => unsub();
   }, []);
 
-  // Real-time listener for incoming friend requests with sound notifications
   useEffect(() => {
     if (!currentUser?.uid) return;
 
@@ -106,7 +112,6 @@ export default function DirectChatsPage() {
     return () => unsub();
   }, [currentUser]);
 
-  // 2. Fetch users and relationship statuses
   const fetchPeersAndRelationships = async (myUid: string) => {
     try {
       const usersSnap = await getDocs(collection(db, 'users'));
@@ -123,7 +128,6 @@ export default function DirectChatsPage() {
       });
       setAvailablePeers(peers);
 
-      // Fetch friendships & requests
       const friendsSnap = await getDocs(
         query(collection(db, 'friends'), where('users', 'array-contains', myUid))
       );
@@ -154,7 +158,6 @@ export default function DirectChatsPage() {
 
       setFriendships(statusMap);
 
-      // Select first friend by default if any available
       const firstFriendUid = peers.find((p) => statusMap[p.uid] === 'friends')?.uid;
       if (firstFriendUid) {
         const friendObj = peers.find((p) => p.uid === firstFriendUid);
@@ -165,7 +168,6 @@ export default function DirectChatsPage() {
     }
   };
 
-  // 3. Send Friend Request Handler
   const handleSendFriendRequest = async (targetPeer: any) => {
     if (!currentUser) return;
     try {
@@ -183,17 +185,14 @@ export default function DirectChatsPage() {
     }
   };
 
-  // 4. Accept Incoming Friend Request Handler
   const handleAcceptRequest = async (senderUid: string, senderName: string) => {
     if (!currentUser) return;
     try {
-      // Create friendship doc with participant array mapping for rule evaluation
       await addDoc(collection(db, 'friends'), {
         users: [currentUser.uid, senderUid],
         createdAt: serverTimestamp(),
       });
 
-      // Delete the pending request
       const q = query(
         collection(db, 'friend_requests'),
         where('senderUid', '==', senderUid),
@@ -214,7 +213,6 @@ export default function DirectChatsPage() {
     }
   };
 
-  // 5. Derive Conversation ID safely ONLY when currentUser & activePeer exist
   useEffect(() => {
     if (!currentUser?.uid || !activePeer?.uid) return;
 
@@ -234,7 +232,6 @@ export default function DirectChatsPage() {
     ).catch((err) => console.warn('Conversation init non-fatal:', err));
   }, [currentUser, activePeer]);
 
-  // 6. Subscribe to messages for the active conversation with sound notifications
   useEffect(() => {
     if (!conversationId || !currentUser?.uid) return;
 
@@ -274,13 +271,13 @@ export default function DirectChatsPage() {
     return () => unsub();
   }, [conversationId, currentUser]);
 
-  // 7. Send Message Handler
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim() || !conversationId || !currentUser) return;
 
     const currentText = text.trim();
     setText('');
+    setShowEmojiPicker(false);
 
     await addDoc(collection(db, 'conversations', conversationId, 'messages'), {
       conversationId,
@@ -301,6 +298,10 @@ export default function DirectChatsPage() {
     );
   };
 
+  const handleAddEmoji = (emoji: string) => {
+    setText((prev) => prev + emoji);
+  };
+
   const formatMessageTime = (createdAt: any) => {
     if (!createdAt) return 'Just now';
     const date = createdAt.seconds ? new Date(createdAt.seconds * 1000) : new Date(createdAt);
@@ -308,28 +309,69 @@ export default function DirectChatsPage() {
   };
 
   return (
-    <main className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
+    <main className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
       {/* PEERS LIST SIDEBAR */}
-      <aside className="w-80 border-r border-slate-800 bg-slate-900 flex flex-col flex-shrink-0">
+      <aside
+        className={`border-r border-slate-800 bg-slate-900 flex flex-col flex-shrink-0 transition-all duration-300 ${
+          isSidebarMinimized ? 'w-20' : 'w-80'
+        }`}
+      >
         <div className="p-4 border-b border-slate-800 font-bold text-sm text-white flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-indigo-400" />
-            Direct Chats & Directory
-          </span>
-          <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+          {!isSidebarMinimized && (
+            <span className="flex items-center gap-2 truncate">
+              <MessageSquare className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+              Direct Chats
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setIsSidebarMinimized((prev) => !prev)}
+            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition mx-auto"
+            title={isSidebarMinimized ? 'Expand Directory' : 'Minimize Directory'}
+          >
+            {isSidebarMinimized ? <PanelLeftOpen className="w-4 h-4 text-indigo-400" /> : <PanelLeftClose className="w-4 h-4 text-indigo-400" />}
+          </button>
         </div>
 
         <div className="p-2 space-y-1.5 overflow-y-auto flex-1">
           {availablePeers.length === 0 ? (
-            <div className="p-6 text-center text-xs text-slate-500 space-y-1">
-              <Users className="w-6 h-6 mx-auto text-slate-700 mb-2" />
-              <p>No other peers found.</p>
-            </div>
+            !isSidebarMinimized && (
+              <div className="p-6 text-center text-xs text-slate-500 space-y-1">
+                <Users className="w-6 h-6 mx-auto text-slate-700 mb-2" />
+                <p>No other peers found.</p>
+              </div>
+            )
           ) : (
             availablePeers.map((peer) => {
               const relation = friendships[peer.uid] || 'none';
               const isSelected = activePeer?.uid === peer.uid;
               const initials = peer.displayName ? peer.displayName.slice(0, 2).toUpperCase() : 'P';
+
+              if (isSidebarMinimized) {
+                return (
+                  <div
+                    key={peer.uid}
+                    onClick={() => {
+                      if (relation === 'friends') {
+                        setActivePeer(peer);
+                      }
+                    }}
+                    title={peer.displayName}
+                    className={`w-12 h-12 mx-auto rounded-2xl flex items-center justify-center font-bold text-xs transition cursor-pointer relative ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                        : relation === 'friends'
+                        ? 'bg-slate-800 hover:bg-slate-700 text-indigo-300'
+                        : 'bg-slate-950/40 text-slate-500 opacity-60'
+                    }`}
+                  >
+                    {initials}
+                    {relation === 'pending_received' && (
+                      <span className="absolute top-0 right-0 w-3 h-3 rounded-full bg-amber-400 ring-2 ring-slate-900" />
+                    )}
+                  </div>
+                );
+              }
 
               return (
                 <div
@@ -404,7 +446,7 @@ export default function DirectChatsPage() {
       </aside>
 
       {/* CHAT WINDOW */}
-      <section className="flex-1 flex flex-col bg-slate-950 min-w-0">
+      <section className="flex-1 flex flex-col bg-slate-950 min-w-0 relative">
         {activePeer ? (
           <>
             <header className="p-4 border-b border-slate-800 bg-slate-900 font-bold text-sm text-white flex items-center gap-3">
@@ -453,12 +495,44 @@ export default function DirectChatsPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* FULL EMOJI PICKER POPUP */}
+            {showEmojiPicker && (
+              <div className="absolute bottom-20 left-4 w-80 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-2xl z-20 space-y-3 max-h-72 overflow-y-auto">
+                {Object.entries(emojiCategories).map(([category, list]) => (
+                  <div key={category}>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">{category}</p>
+                    <div className="grid grid-cols-7 gap-1.5">
+                      {list.map((emoji, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleAddEmoji(emoji)}
+                          className="w-9 h-9 rounded-xl bg-slate-950 hover:bg-indigo-600/30 flex items-center justify-center text-lg transition"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* COMPOSER */}
-            <footer className="p-3 bg-slate-900 border-t border-slate-800">
+            <footer className="p-3 bg-slate-900 border-t border-slate-800 relative">
               <form
                 onSubmit={handleSendMessage}
                 className="flex items-center gap-2 max-w-4xl mx-auto"
               >
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker((prev) => !prev)}
+                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                  title="Insert Emoji"
+                >
+                  <Smile className="w-4 h-4 text-amber-400" />
+                </button>
+
                 <input
                   type="text"
                   value={text}
