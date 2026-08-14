@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Sidebar from '@/components/layout/Sidebar';
+import GlobalNotificationListener from '@/components/GlobalNotificationListener';
 import './globals.css';
 
 export default function RootLayout({
@@ -29,6 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen bg-[#020617] text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
+        <GlobalNotificationListener />
         <div className="flex min-h-screen w-full overflow-x-hidden">
           {/* Persistent Sidebar */}
           <Sidebar
