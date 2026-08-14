@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
-import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell } from 'lucide-react';
 
 export default function DirectChatsPage() {
   const router = useRouter();
@@ -32,6 +32,7 @@ export default function DirectChatsPage() {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(false);
+  const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean>(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +66,35 @@ export default function DirectChatsPage() {
       osc.stop(ctx.currentTime + 0.3);
     } catch (err) {
       console.warn('Audio play blocked or unsupported:', err);
+    }
+  };
+
+  // Check initial notification permission state on mount
+  useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermissionGranted(Notification.permission === 'granted');
+    }
+  }, []);
+
+  // User-gesture triggered permission handler
+  const handleRequestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      alert('This browser does not support desktop notifications.');
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermissionGranted(permission === 'granted');
+      if (permission === 'granted') {
+        new Notification('Notifications Enabled', {
+          body: 'You will now receive alerts for incoming messages and friend requests.',
+        });
+      } else {
+        alert('Notification permission was denied.');
+      }
+    } catch (err) {
+      console.error('Error requesting notification permission:', err);
     }
   };
 
@@ -105,6 +135,12 @@ export default function DirectChatsPage() {
           playNotificationSound();
           const data = change.doc.data();
           setFriendships((prev) => ({ ...prev, [data.senderUid]: 'pending_received' }));
+          
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('New Friend Request', {
+              body: `${data.senderName || 'Someone'} sent you a friend request!`,
+            });
+          }
         }
       });
     });
@@ -251,6 +287,11 @@ export default function DirectChatsPage() {
               const data = change.doc.data();
               if (data.senderUid !== currentUser?.uid) {
                 playNotificationSound();
+                if ('Notification' in window && Notification.permission === 'granted') {
+                  new Notification(`New message from ${data.senderName || 'Peer'}`, {
+                    body: data.text || 'Sent you a message',
+                  });
+                }
               }
             }
           });
@@ -332,6 +373,24 @@ export default function DirectChatsPage() {
             {isSidebarMinimized ? <PanelLeftOpen className="w-4 h-4 text-indigo-400" /> : <PanelLeftClose className="w-4 h-4 text-indigo-400" />}
           </button>
         </div>
+
+        {/* NOTIFICATION PROMPT BUTTON (Shown if not granted and sidebar not minimized) */}
+        {!isSidebarMinimized && !notificationPermissionGranted && (
+          <div className="p-3 m-3 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between gap-2">
+            <div className="truncate">
+              <h5 className="text-[11px] font-bold text-white flex items-center gap-1">
+                <Bell className="w-3 h-3 text-indigo-400" /> Enable Alerts
+              </h5>
+              <p className="text-[10px] text-slate-400 truncate">Get push alerts for messages</p>
+            </div>
+            <button
+              onClick={handleRequestNotificationPermission}
+              className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold transition shadow flex-shrink-0"
+            >
+              Allow
+            </button>
+          </div>
+        )}
 
         <div className="p-2 space-y-1.5 overflow-y-auto flex-1">
           {availablePeers.length === 0 ? (
