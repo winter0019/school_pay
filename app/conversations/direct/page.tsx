@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
-import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell } from 'lucide-react';
+import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell, Paperclip, Image as ImageIcon, X, Phone, Video, PhoneOff } from 'lucide-react';
 
 export default function DirectChatsPage() {
   const router = useRouter();
@@ -30,11 +30,29 @@ export default function DirectChatsPage() {
   const [conversationId, setConversationId] = useState<string>('');
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
+  const [attachment, setAttachment] = useState<{ type: 'image' | 'file'; url: string; name: string } | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(false);
   const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean>(false);
 
+  // Call simulation states
+  const [callActive, setCallActive] = useState<boolean>(false);
+  const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+
+  const servers = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  };
 
   const emojiCategories = {
     Smileys: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛'],
@@ -69,14 +87,12 @@ export default function DirectChatsPage() {
     }
   };
 
-  // Check initial notification permission state on mount
   useEffect(() => {
     if ('Notification' in window) {
       setNotificationPermissionGranted(Notification.permission === 'granted');
     }
   }, []);
 
-  // User-gesture triggered permission handler
   const handleRequestNotificationPermission = async () => {
     if (!('Notification' in window)) {
       alert('This browser does not support desktop notifications.');
@@ -289,7 +305,7 @@ export default function DirectChatsPage() {
                 playNotificationSound();
                 if ('Notification' in window && Notification.permission === 'granted') {
                   new Notification(`New message from ${data.senderName || 'Peer'}`, {
-                    body: data.text || 'Sent you a message',
+                    body: data.text || 'Sent an attachment',
                   });
                 }
               }
@@ -312,12 +328,31 @@ export default function DirectChatsPage() {
     return () => unsub();
   }, [conversationId, currentUser]);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    const isImage = file.type.startsWith('image/');
+    
+    reader.onload = (uploadEvent) => {
+      setAttachment({
+        type: isImage ? 'image' : 'file',
+        url: uploadEvent.target?.result as string,
+        name: file.name,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() || !conversationId || !currentUser) return;
+    if ((!text.trim() && !attachment) || !conversationId || !currentUser) return;
 
     const currentText = text.trim();
+    const currentAttachment = attachment;
     setText('');
+    setAttachment(null);
     setShowEmojiPicker(false);
 
     await addDoc(collection(db, 'conversations', conversationId, 'messages'), {
@@ -325,13 +360,14 @@ export default function DirectChatsPage() {
       senderUid: currentUser.uid,
       senderName: currentUser.displayName,
       text: currentText,
+      attachment: currentAttachment,
       createdAt: serverTimestamp(),
     });
 
     await setDoc(
       doc(db, 'conversations', conversationId),
       {
-        lastMessage: currentText,
+        lastMessage: currentText || (currentAttachment?.type === 'image' ? '📷 Image' : '📎 Attachment'),
         lastSenderUid: currentUser.uid,
         updatedAt: serverTimestamp(),
       },
@@ -347,6 +383,93 @@ export default function DirectChatsPage() {
     if (!createdAt) return 'Just now';
     const date = createdAt.seconds ? new Date(createdAt.seconds * 1000) : new Date(createdAt);
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Start Call and Create WebRTC Offer
+  const startCall = async (type: 'audio' | 'video') => {
+    if (!conversationId || !currentUser) return;
+    setCallType(type);
+    setCallActive(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video',
+      });
+      localStreamRef.current = stream;
+      if (localVideoRef.current && type === 'video') {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      const pc = new RTCPeerConnection(servers);
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      const remoteStream = new MediaStream();
+      remoteStreamRef.current = remoteStream;
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
+        }
+      };
+
+      const callDocRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
+        }
+      };
+
+      const offerDescription = await pc.createOffer();
+      await pc.setLocalDescription(offerDescription);
+
+      await setDoc(callDocRef, {
+        callerUid: currentUser.uid,
+        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
+        type,
+        status: 'ringing',
+        createdAt: serverTimestamp(),
+      });
+
+      onSnapshot(callDocRef, (snapshot) => {
+        const data = snapshot.data();
+        if (!pc.currentRemoteDescription && data?.answer) {
+          const answerDescription = new RTCSessionDescription(data.answer);
+          pc.setRemoteDescription(answerDescription);
+        }
+      });
+
+      onSnapshot(collection(callDocRef, 'candidates'), (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const candidate = new RTCIceCandidate(change.doc.data());
+            pc.addIceCandidate(candidate);
+          }
+        });
+      });
+    } catch (err) {
+      console.error('Call initialization error:', err);
+      alert('Could not start media stream or signaling session.');
+      endCall();
+    }
+  };
+
+  // End Call & Cleanup
+  const endCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    setCallActive(false);
+    setCallType(null);
   };
 
   return (
@@ -374,7 +497,6 @@ export default function DirectChatsPage() {
           </button>
         </div>
 
-        {/* NOTIFICATION PROMPT BUTTON (Shown if not granted and sidebar not minimized) */}
         {!isSidebarMinimized && !notificationPermissionGranted && (
           <div className="p-3 m-3 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between gap-2">
             <div className="truncate">
@@ -508,17 +630,72 @@ export default function DirectChatsPage() {
       <section className="flex-1 flex flex-col bg-slate-950 min-w-0 relative">
         {activePeer ? (
           <>
-            <header className="p-4 border-b border-slate-800 bg-slate-900 font-bold text-sm text-white flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                <User className="w-4 h-4" />
+            <header className="p-4 border-b border-slate-800 bg-slate-900 font-bold text-sm text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <User className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="block text-sm font-bold text-white">{activePeer.displayName}</span>
+                  <span className="block text-[10px] text-emerald-400 font-normal flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span> Active Direct Message
+                  </span>
+                </div>
               </div>
-              <div>
-                <span className="block text-sm font-bold text-white">{activePeer.displayName}</span>
-                <span className="block text-[10px] text-emerald-400 font-normal flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span> Active Direct Message
-                </span>
+
+              {/* CALL ACTIONS */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => startCall('audio')}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"
+                  title="Start Audio Call"
+                >
+                  <Phone className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startCall('video')}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 transition"
+                  title="Start Video Call"
+                >
+                  <Video className="w-4 h-4" />
+                </button>
               </div>
             </header>
+
+            {/* CALL OVERLAY MODAL */}
+            {callActive && (
+              <div className="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center p-6 space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="w-20 h-20 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-2xl font-bold text-indigo-300 mx-auto animate-pulse">
+                    {activePeer.displayName.slice(0, 2).toUpperCase()}
+                  </div>
+                  <h3 className="text-lg font-bold text-white">
+                    {callType === 'video' ? 'Video Call with' : 'Audio Call with'} {activePeer.displayName}
+                  </h3>
+                  <p className="text-xs text-emerald-400 font-medium">Connected • Secure Stream</p>
+                </div>
+
+                {callType === 'video' && (
+                  <div className="w-full max-w-2xl aspect-video bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden relative shadow-2xl flex">
+                    <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                    <div className="absolute bottom-4 right-4 w-32 aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-700 shadow-lg">
+                      <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={endCall}
+                    className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-rose-600/30"
+                  >
+                    <PhoneOff className="w-4 h-4" /> End Call
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* MESSAGES FEED */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -539,13 +716,29 @@ export default function DirectChatsPage() {
                         {isMe ? 'You' : m.senderName || 'Peer'} • {formatMessageTime(m.createdAt)}
                       </span>
                       <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed ${
+                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm space-y-2 leading-relaxed ${
                           isMe
                             ? 'bg-indigo-600 text-white rounded-br-none'
                             : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
                         }`}
                       >
-                        {m.text}
+                        {m.attachment && (
+                          <div className="rounded-xl overflow-hidden max-w-xs">
+                            {m.attachment.type === 'image' ? (
+                              <img src={m.attachment.url} alt="Uploaded attachment" className="w-full object-cover rounded-xl max-h-48" />
+                            ) : (
+                              <a
+                                href={m.attachment.url}
+                                download={m.attachment.name}
+                                className="flex items-center gap-2 p-2.5 bg-slate-950/60 rounded-xl text-xs font-semibold hover:bg-slate-950 transition"
+                              >
+                                <Paperclip className="w-4 h-4 text-indigo-400" />
+                                <span className="truncate">{m.attachment.name}</span>
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {m.text && <p>{m.text}</p>}
                       </div>
                     </div>
                   );
@@ -577,8 +770,36 @@ export default function DirectChatsPage() {
               </div>
             )}
 
+            {/* ATTACHMENT PREVIEW BAR */}
+            {attachment && (
+              <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2 truncate">
+                  {attachment.type === 'image' ? (
+                    <img src={attachment.url} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                      <Paperclip className="w-5 h-5" />
+                    </div>
+                  )}
+                  <span className="text-xs text-slate-200 truncate">{attachment.name}</span>
+                </div>
+                <button
+                  onClick={() => setAttachment(null)}
+                  className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {/* COMPOSER */}
             <footer className="p-3 bg-slate-900 border-t border-slate-800 relative">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+              />
               <form
                 onSubmit={handleSendMessage}
                 className="flex items-center gap-2 max-w-4xl mx-auto"
@@ -590,6 +811,15 @@ export default function DirectChatsPage() {
                   title="Insert Emoji"
                 >
                   <Smile className="w-4 h-4 text-amber-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                  title="Attach File or Image"
+                >
+                  <Paperclip className="w-4 h-4 text-indigo-400" />
                 </button>
 
                 <input
