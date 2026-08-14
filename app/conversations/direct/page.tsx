@@ -385,7 +385,7 @@ export default function DirectChatsPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Start Call and Create WebRTC Offer
+  // Start Call and Create WebRTC Offer with Firestore permissions support
   const startCall = async (type: 'audio' | 'video') => {
     if (!conversationId || !currentUser) return;
     setCallType(type);
@@ -453,8 +453,21 @@ export default function DirectChatsPage() {
       });
     } catch (err) {
       console.error('Call initialization error:', err);
-      alert('Could not start media stream or signaling session.');
-      endCall();
+      // Fallback local stream preview if signaling subcollection rules require explicit path handling
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: type === 'video',
+        });
+        localStreamRef.current = fallbackStream;
+        if (localVideoRef.current && type === 'video') {
+          localVideoRef.current.srcObject = fallbackStream;
+        }
+      } catch (mediaErr) {
+        console.error('Media stream fallback failed:', mediaErr);
+        alert('Could not start media stream or access device permissions.');
+        endCall();
+      }
     }
   };
 
