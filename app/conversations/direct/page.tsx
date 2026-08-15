@@ -14,6 +14,7 @@ import {
   getDocs,
   where,
   deleteDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
@@ -35,9 +36,10 @@ export default function DirectChatsPage() {
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(false);
   const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean>(false);
 
-  // Call simulation states
+  // Call states
   const [callActive, setCallActive] = useState<boolean>(false);
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video' } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,6 +48,10 @@ export default function DirectChatsPage() {
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  
+  // Ref storage for active call snapshot unsubscription handlers
+  const callUnsubRef = useRef<(() => void) | null>(null);
+  const candidatesUnsubRef = useRef<(() => void) | null>(null);
 
   const servers = {
     iceServers: [
@@ -129,39 +135,35 @@ export default function DirectChatsPage() {
     return () => unsub();
   }, []);
 
+  // Listen for active incoming calls globally across conversations
   useEffect(() => {
     if (!currentUser?.uid) return;
 
-    const q = query(
-      collection(db, 'friend_requests'),
-      where('receiverUid', '==', currentUser.uid),
-      where('status', '==', 'pending')
+    const unsubConvs = onSnapshot(
+      query(collection(db, 'conversations'), where('participantIds', 'array-contains', currentUser.uid)),
+      (snapshot) => {
+        snapshot.docs.forEach((convDoc) => {
+          const convId = convDoc.id;
+          const callRef = doc(db, 'conversations', convId, 'calls', 'active_call');
+
+          onSnapshot(callRef, (callSnap) => {
+            if (callSnap.exists()) {
+              const callData = callSnap.data();
+              if (callData.callerUid !== currentUser.uid && callData.status === 'ringing') {
+                setConversationId(convId);
+                setIncomingCall({
+                  callerName: callData.callerName || 'Peer',
+                  type: callData.type || 'audio',
+                });
+                playNotificationSound();
+              }
+            }
+          });
+        });
+      }
     );
 
-    let isInitialLoad = true;
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      if (isInitialLoad) {
-        isInitialLoad = false;
-        return;
-      }
-
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          playNotificationSound();
-          const data = change.doc.data();
-          setFriendships((prev) => ({ ...prev, [data.senderUid]: 'pending_received' }));
-          
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('New Friend Request', {
-              body: `${data.senderName || 'Someone'} sent you a friend request!`,
-            });
-          }
-        }
-      });
-    });
-
-    return () => unsub();
+    return () => unsubConvs();
   }, [currentUser]);
 
   const fetchPeersAndRelationships = async (myUid: string) => {
@@ -385,7 +387,7 @@ export default function DirectChatsPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Start Call and Create WebRTC Offer with Firestore permissions support
+  // Start Call and Create WebRTC Offer with strict TypeScript compatibility
   const startCall = async (type: 'audio' | 'video') => {
     if (!conversationId || !currentUser) return;
     setCallType(type);
@@ -396,6 +398,12 @@ export default function DirectChatsPage() {
         audio: true,
         video: type === 'video',
       });
+      
+      if (!peerConnectionRef.current && callActive === false) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       localStreamRef.current = stream;
       if (localVideoRef.current && type === 'video') {
         localVideoRef.current.srcObject = stream;
@@ -418,9 +426,15 @@ export default function DirectChatsPage() {
       };
 
       const callDocRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
+      const iceCandidateQueue: RTCIceCandidateInit[] = [];
+
       pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
+        if (event.candidate && peerConnectionRef.current) {
+          try {
+            await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
+          } catch (e) {
+            console.warn('Failed to add candidate:', e);
+          }
         }
       };
 
@@ -429,64 +443,235 @@ export default function DirectChatsPage() {
 
       await setDoc(callDocRef, {
         callerUid: currentUser.uid,
+        callerName: currentUser.displayName,
         offer: { type: offerDescription.type, sdp: offerDescription.sdp },
         type,
         status: 'ringing',
         createdAt: serverTimestamp(),
       });
 
-      onSnapshot(callDocRef, (snapshot) => {
+      callUnsubRef.current = onSnapshot(callDocRef, async (snapshot) => {
+        if (!peerConnectionRef.current) return;
         const data = snapshot.data();
         if (!pc.currentRemoteDescription && data?.answer) {
-          const answerDescription = new RTCSessionDescription(data.answer);
-          pc.setRemoteDescription(answerDescription);
+          try {
+            const answerDescription = new RTCSessionDescription(data.answer);
+            await pc.setRemoteDescription(answerDescription);
+
+            while (iceCandidateQueue.length > 0) {
+              const queuedCandidate = iceCandidateQueue.shift();
+              if (queuedCandidate && pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+              }
+            }
+          } catch (e) {
+            console.warn('Error setting remote description or flushing candidates:', e);
+          }
         }
       });
 
-      onSnapshot(collection(callDocRef, 'candidates'), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
+      candidatesUnsubRef.current = onSnapshot(collection(callDocRef, 'candidates'), async (snapshot) => {
+        if (!peerConnectionRef.current) return;
+        snapshot.docChanges().forEach(async (change) => {
           if (change.type === 'added') {
-            const candidate = new RTCIceCandidate(change.doc.data());
-            pc.addIceCandidate(candidate);
+            const candidateData = change.doc.data();
+            try {
+              if (pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidateData));
+              } else {
+                iceCandidateQueue.push(candidateData);
+              }
+            } catch (e) {
+              console.warn('Error adding ice candidate:', e);
+            }
           }
         });
       });
     } catch (err) {
       console.error('Call initialization error:', err);
-      // Fallback local stream preview if signaling subcollection rules require explicit path handling
-      try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: type === 'video',
+      alert('Could not start media stream or access device permissions.');
+      endCall();
+    }
+  };
+
+  // Accept Incoming Call with strict TypeScript compatibility
+  const acceptCall = async () => {
+    if (!conversationId || !currentUser) return;
+    setIncomingCall(null);
+    setCallActive(true);
+
+    try {
+      const callDocRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: incomingCall?.type === 'video',
+      });
+
+      localStreamRef.current = stream;
+      if (localVideoRef.current && incomingCall?.type === 'video') {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      const pc = new RTCPeerConnection(servers);
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      const remoteStream = new MediaStream();
+      remoteStreamRef.current = remoteStream;
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
         });
-        localStreamRef.current = fallbackStream;
-        if (localVideoRef.current && type === 'video') {
-          localVideoRef.current.srcObject = fallbackStream;
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
         }
-      } catch (mediaErr) {
-        console.error('Media stream fallback failed:', mediaErr);
-        alert('Could not start media stream or access device permissions.');
-        endCall();
+      };
+
+      const iceCandidateQueue: RTCIceCandidateInit[] = [];
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate && peerConnectionRef.current) {
+          try {
+            await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
+          } catch (e) {
+            console.warn('Failed to add candidate:', e);
+          }
+        }
+      };
+
+      callUnsubRef.current = onSnapshot(callDocRef, async (snapshot) => {
+        if (!peerConnectionRef.current) return;
+        const data = snapshot.data();
+        if (data?.offer && !pc.currentRemoteDescription) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answerDescription = await pc.createAnswer();
+            await pc.setLocalDescription(answerDescription);
+
+            await updateDoc(callDocRef, {
+              answer: { type: answerDescription.type, sdp: answerDescription.sdp },
+              status: 'connected',
+            });
+
+            while (iceCandidateQueue.length > 0) {
+              const queuedCandidate = iceCandidateQueue.shift();
+              if (queuedCandidate && pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+              }
+            }
+          } catch (e) {
+            console.warn('Error handling offer/answer setup:', e);
+          }
+        }
+      });
+
+      candidatesUnsubRef.current = onSnapshot(collection(callDocRef, 'candidates'), async (snapshot) => {
+        if (!peerConnectionRef.current) return;
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === 'added') {
+            const candidateData = change.doc.data();
+            try {
+              if (pc.remoteDescription) {
+                await pc.addIceCandidate(new RTCIceCandidate(candidateData));
+              } else {
+                iceCandidateQueue.push(candidateData);
+              }
+            } catch (e) {
+              console.warn('Error adding ice candidate:', e);
+            }
+          }
+        });
+      });
+    } catch (err) {
+      console.error('Failed to accept call:', err);
+      endCall();
+    }
+  };
+
+  // Reject Incoming Call
+  const rejectCall = async () => {
+    setIncomingCall(null);
+    if (conversationId) {
+      try {
+        await deleteDoc(doc(db, 'conversations', conversationId, 'calls', 'active_call'));
+      } catch (err) {
+        console.warn('Call cleanup error:', err);
       }
     }
   };
 
   // End Call & Cleanup
-  const endCall = () => {
+  const endCall = async () => {
+    if (callUnsubRef.current) {
+      callUnsubRef.current();
+      callUnsubRef.current = null;
+    }
+    if (candidatesUnsubRef.current) {
+      candidatesUnsubRef.current();
+      candidatesUnsubRef.current = null;
+    }
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
     if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
+      try {
+        peerConnectionRef.current.close();
+      } catch (e) {
+        console.warn('Error closing peer connection:', e);
+      }
       peerConnectionRef.current = null;
     }
     setCallActive(false);
+    setIncomingCall(null);
     setCallType(null);
+
+    if (conversationId) {
+      try {
+        await deleteDoc(doc(db, 'conversations', conversationId, 'calls', 'active_call'));
+      } catch (err) {
+        console.warn('Call doc cleanup error:', err);
+      }
+    }
   };
 
   return (
     <main className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
+      {/* INCOMING CALL MODAL POPUP */}
+      {incomingCall && (
+        <div className="absolute inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center p-6 space-y-6">
+          <div className="text-center space-y-3">
+            <div className="w-24 h-24 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-3xl font-bold text-indigo-300 mx-auto animate-bounce">
+              {incomingCall.callerName.slice(0, 2).toUpperCase()}
+            </div>
+            <h3 className="text-xl font-extrabold text-white">
+              Incoming {incomingCall.type === 'video' ? 'Video' : 'Audio'} Call
+            </h3>
+            <p className="text-sm text-slate-300">
+              <span className="font-bold text-indigo-400">{incomingCall.callerName}</span> is calling you...
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={rejectCall}
+              className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-rose-600/30"
+            >
+              <PhoneOff className="w-4 h-4" /> Reject
+            </button>
+            <button
+              onClick={acceptCall}
+              className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-emerald-600/30"
+            >
+              <Phone className="w-4 h-4" /> Accept
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* PEERS LIST SIDEBAR */}
       <aside
         className={`border-r border-slate-800 bg-slate-900 flex flex-col flex-shrink-0 transition-all duration-300 ${

@@ -28,7 +28,7 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-screen bg-[#020617] text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
         <GlobalNotificationListener />
         <div className="flex min-h-screen w-full overflow-x-hidden">
