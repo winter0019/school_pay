@@ -27,6 +27,7 @@ import { conversationService } from '@/features/chat/services/conversationServic
 import { callHistoryService } from '@/features/chat/services/callHistoryService';
 import { friendService } from '@/features/chat/services/friendService';
 import { notificationService } from '@/features/notifications/services/notificationService';
+import { incomingCallService, IncomingCallNotification } from '@/features/chat/services/incomingCallService';
 
 import { IncomingCallBanner } from '@/features/chat/components/IncomingCallBanner';
 import { ActiveCall } from '@/features/chat/components/ActiveCall';
@@ -70,13 +71,14 @@ export default function DirectChatsPage() {
   const [callActive, setCallActive] = useState<boolean>(false);
   const [callStatus, setCallStatus] = useState<'ringing' | 'connected'>('ringing');
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
-  const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video' } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video'; conversationId: string; callId: string } | null>(null);
   const [callHistory, setCallHistory] = useState<any[]>([]);
   const [showCallHistory, setShowCallHistory] = useState<boolean>(true);
   
   const incomingCallConversationRef = useRef<string | null>(null);
+  const activeCallIdRef = useRef<string | null>(null);
   const callActiveRef = useRef(false);
-  const incomingCallRef = useRef<{ callerName: string; type: 'audio' | 'video' } | null>(null);
+  const incomingCallRef = useRef<any | null>(null);
   const callPeerNameRef = useRef<string | null>(null);
   const callDirectionRef = useRef<'outgoing' | 'incoming' | null>(null);
   const callHistorySavedRef = useRef(false);
@@ -160,76 +162,41 @@ export default function DirectChatsPage() {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
 
-  // Global realtime incoming call listener
+  // Global realtime incoming call listener using user incomingCalls inbox
   useEffect(() => {
     if (!currentUser?.uid) return;
 
-    const unsubscribeCallListeners = new Map<string, () => void>();
-    let disposed = false;
+    const unsubscribe = incomingCallService.subscribeToIncomingCalls(currentUser.uid, (calls) => {
+      if (calls.length > 0) {
+        const latestCall = calls[0];
+        incomingCallConversationRef.current = latestCall.conversationId;
+        activeCallIdRef.current = latestCall.callId;
 
-    const syncCallListeners = (snapshot: any) => {
-      if (disposed) return;
-      const liveConversationIds = new Set<string>();
-
-      snapshot.docs.forEach((convDoc: any) => {
-        const convId = convDoc.id;
-        liveConversationIds.add(convId);
-
-        if (unsubscribeCallListeners.has(convId)) return;
-
-        const callRef = doc(db, 'conversations', convId, 'calls', 'active_call');
-        const unsubscribe = onSnapshot(callRef, (callSnap) => {
-          if (disposed) return;
-
-          if (!callSnap.exists()) {
-            if (callActiveRef.current || incomingCallRef.current) {
-              callService.cleanup();
-              setCallActive(false);
-              setIncomingCall(null);
-              stopRingtone();
-            }
-            return;
-          }
-
-          const callData = callSnap.data();
-          if (callData.callerUid !== currentUser.uid && callData.status === 'ringing') {
-            incomingCallConversationRef.current = convId;
-            setIncomingCall((prev) => {
-              if (prev) return prev;
-              startRingtone();
-              notificationService.showNotification(
-                `Incoming ${callData.type === 'video' ? 'Video' : 'Audio'} Call`,
-                `${callData.callerName || 'Peer'} is calling you...`
-              );
-              return {
-                callerName: callData.callerName || 'Peer',
-                type: callData.type || 'audio',
-              };
-            });
-          }
+        setIncomingCall((prev) => {
+          if (prev) return prev;
+          startRingtone();
+          notificationService.showNotification(
+            `Incoming ${latestCall.type === 'video' ? 'Video' : 'Audio'} Call`,
+            `${latestCall.callerName || 'Peer'} is calling you...`
+          );
+          return {
+            callerName: latestCall.callerName || 'Peer',
+            type: latestCall.type || 'audio',
+            conversationId: latestCall.conversationId,
+            callId: latestCall.callId,
+          };
         });
-
-        unsubscribeCallListeners.set(convId, unsubscribe);
-      });
-
-      unsubscribeCallListeners.forEach((unsubscribe, convId) => {
-        if (!liveConversationIds.has(convId)) {
-          unsubscribe();
-          unsubscribeCallListeners.delete(convId);
+      } else {
+        if (incomingCallRef.current && !callActiveRef.current) {
+          stopRingtone();
+          setIncomingCall(null);
+          incomingCallConversationRef.current = null;
+          activeCallIdRef.current = null;
         }
-      });
-    };
+      }
+    });
 
-    const unsubscribeConvs = onSnapshot(
-      query(collection(db, 'conversations'), where('participantIds', 'array-contains', currentUser.uid)),
-      syncCallListeners
-    );
-
-    return () => {
-      disposed = true;
-      unsubscribeConvs();
-      unsubscribeCallListeners.forEach((unsubscribe) => unsubscribe());
-    };
+    return () => unsubscribe();
   }, [currentUser?.uid]);
 
   const fetchPeersAndRelationships = async (myUid: string) => {
@@ -383,6 +350,24 @@ export default function DirectChatsPage() {
     startRingtone();
 
     try {
+      await callService.createCall({
+        conversationId,
+        callerUid: currentUser.uid,
+        receiverUid: activePeer.uid,
+        type,
+        offer: {} as any,
+      });
+
+      await incomingCallService.sendIncomingCall({
+        receiverUid: activePeer.uid,
+        callId: conversationId,
+        conversationId,
+        callerUid: currentUser.uid,
+        callerName: currentUser.displayName,
+        type,
+        offer: {} as any,
+      });
+
       const stream = await callService.startCall({
         conversationId,
         currentUserUid: currentUser.uid,
@@ -427,7 +412,12 @@ export default function DirectChatsPage() {
   const acceptCall = async () => {
     stopRingtone();
     const incomingConvId = incomingCallConversationRef.current;
+    const callId = activeCallIdRef.current;
     if (!incomingConvId || !currentUser || !incomingCall) return;
+
+    if (callId) {
+      await incomingCallService.clearIncomingCall(currentUser.uid, callId);
+    }
 
     const acceptedType = incomingCall.type;
     callDirectionRef.current = 'incoming';
@@ -493,8 +483,13 @@ export default function DirectChatsPage() {
       });
     }
     const convId = incomingCallConversationRef.current;
+    const callId = activeCallIdRef.current;
+    if (currentUser && callId) {
+      await incomingCallService.clearIncomingCall(currentUser.uid, callId);
+    }
     setIncomingCall(null);
     incomingCallConversationRef.current = null;
+    activeCallIdRef.current = null;
     if (convId) await callService.terminateCall(convId);
   };
 
@@ -513,10 +508,15 @@ export default function DirectChatsPage() {
       });
       callHistorySavedRef.current = true;
     }
+    if (currentUser && activeCallIdRef.current) {
+      await incomingCallService.clearIncomingCall(currentUser.uid, activeCallIdRef.current);
+    }
     callService.cleanup();
     setCallActive(false);
     setIncomingCall(null);
     setCallType(null);
+    incomingCallConversationRef.current = null;
+    activeCallIdRef.current = null;
     if (convId) await callService.terminateCall(convId);
   };
 
