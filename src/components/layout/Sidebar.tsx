@@ -3,35 +3,58 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-// Uncomment if using Firebase Auth:
-// import { getAuth, signOut } from "firebase/auth";
+import { getAuth, signOut } from "firebase/auth";
+import { doc, deleteDoc } from "firebase/firestore";
+import { db } from "@/firebase/firestore";
+import { useUserStore } from "@/store/userStore";
 
 interface SidebarProps {
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  currentUser?: { uid: string; displayName?: string } | null;
 }
 
 export default function Sidebar({
   isCollapsed = false,
   onToggleCollapse,
+  currentUser,
 }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const clearUser = useUserStore((state) => state.clearUser);
+  const storeUser = useUserStore((state) => state.user);
+
+  const activeUserUid = currentUser?.uid || storeUser?.uid;
+  const activeDisplayName = currentUser?.displayName || storeUser?.displayName;
 
   const handleSignOut = async () => {
+    if (isSigningOut) return;
     try {
-      // If using Firebase:
-      // const auth = getAuth();
-      // await signOut(auth);
+      setIsSigningOut(true);
 
-      // Clear local storage / tokens if any:
-      localStorage.removeItem("smartc_sidebar_collapsed");
+      if (activeUserUid) {
+        try {
+          await deleteDoc(doc(db, "user_presence", activeUserUid));
+        } catch (e) {
+          console.warn("Presence cleanup note:", e);
+        }
+      }
+
+      const auth = getAuth();
+      await signOut(auth);
+      clearUser();
+
+      if (typeof window !== "undefined") {
+        window.localStorage.clear();
+      }
       
-      // Redirect to login or home
-      router.push("/");
+      window.location.href = "/login";
     } catch (error) {
       console.error("Error signing out:", error);
+      setIsSigningOut(false);
     }
   };
 
@@ -76,7 +99,6 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile Top Header */}
       <div className="fixed left-0 right-0 top-0 z-40 flex h-16 items-center justify-between border-b border-slate-800/80 bg-slate-950/90 px-4 backdrop-blur-md md:hidden">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 font-bold text-white shadow-lg shadow-indigo-500/20">
@@ -95,7 +117,6 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Mobile Backdrop */}
       {mobileOpen && (
         <div
           onClick={() => setMobileOpen(false)}
@@ -103,7 +124,6 @@ export default function Sidebar({
         />
       )}
 
-      {/* Persistent Sidebar Drawer */}
       <aside
         className={`fixed bottom-0 left-0 top-0 z-50 flex flex-col border-r border-slate-800/80 bg-[#070913] p-4 transition-transform duration-300 ease-in-out w-64 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
@@ -111,7 +131,6 @@ export default function Sidebar({
           isCollapsed ? "md:w-20" : "md:w-64"
         } shrink-0`}
       >
-        {/* Brand Header */}
         <div className="mb-6 flex items-center justify-between px-2 py-1">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 font-bold text-white shadow-lg shadow-indigo-500/25">
@@ -130,7 +149,6 @@ export default function Sidebar({
             )}
           </div>
 
-          {/* Desktop Collapse Toggle */}
           {onToggleCollapse && (
             <button
               type="button"
@@ -143,7 +161,6 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Navigation Items */}
         <nav className="flex-1 space-y-1.5">
           {navItems.map((item) => {
             const active =
@@ -170,31 +187,34 @@ export default function Sidebar({
           })}
         </nav>
 
-        {/* Footer Profile & Sign Out Button */}
-        {!isCollapsed && (
-          <div className="mt-auto border-t border-slate-800/80 pt-4 px-1 space-y-3">
+        <div className="mt-auto border-t border-slate-800/80 pt-4 px-1 space-y-3">
+          {!isCollapsed && (
             <div className="flex items-center gap-3 rounded-xl bg-slate-900/40 p-2.5 border border-slate-800/50">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-950 border border-indigo-500/30 text-indigo-300 font-semibold text-xs">
-                N
+                {activeDisplayName?.[0] || "N"}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium text-slate-200">smartC</p>
+                <p className="truncate text-xs font-medium text-slate-200">{activeDisplayName || "smartC User"}</p>
                 <p className="truncate text-[10px] text-slate-500">Connect • Collaborate</p>
               </div>
             </div>
+          )}
 
-            <button
-              onClick={handleSignOut}
-              type="button"
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs font-semibold text-red-400 transition hover:bg-red-500/20 hover:text-red-300"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              Sign Out
-            </button>
-          </div>
-        )}
+          <button
+            onClick={handleSignOut}
+            type="button"
+            disabled={isSigningOut}
+            title="Sign Out"
+            className={`w-full flex items-center justify-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2.5 text-xs font-semibold text-rose-400 transition hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-50 ${
+              isCollapsed ? "p-2.5" : ""
+            }`}
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            {!isCollapsed && <span>{isSigningOut ? "Signing out..." : "Sign Out"}</span>}
+          </button>
+        </div>
       </aside>
     </>
   );

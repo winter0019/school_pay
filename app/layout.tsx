@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import Sidebar from '@/components/layout/Sidebar';
 import GlobalNotificationListener from '@/components/GlobalNotificationListener';
 import './globals.css';
@@ -10,7 +11,11 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  // Hide the sidebar if the user is on the login page or root path (or any sub-route under login)
+  const isLoginPage = pathname === '/' || pathname?.startsWith('/login');
 
   useEffect(() => {
     const savedState = localStorage.getItem('smartc_sidebar_collapsed');
@@ -32,11 +37,13 @@ export default function RootLayout({
       <body className="min-h-screen bg-[#020617] text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
         <GlobalNotificationListener />
         <div className="flex min-h-screen w-full overflow-x-hidden">
-          {/* Persistent Sidebar */}
-          <Sidebar
-            isCollapsed={isCollapsed}
-            onToggleCollapse={handleToggleCollapse}
-          />
+          {/* Persistent Sidebar (Hidden on Login) */}
+          {!isLoginPage && (
+            <Sidebar
+              isCollapsed={isCollapsed}
+              onToggleCollapse={handleToggleCollapse}
+            />
+          )}
 
           {/* Fluid Main Content Area */}
           <main className="flex-1 flex flex-col min-w-0 pt-16 md:pt-0 overflow-y-auto">

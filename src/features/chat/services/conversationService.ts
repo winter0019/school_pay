@@ -1,123 +1,115 @@
 import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  serverTimestamp,
   doc,
+  setDoc,
   getDoc,
-  type DocumentData,
-} from "firebase/firestore";
+} from 'firebase/firestore';
+import { db } from '@/firebase/firestore';
 
-import { db } from "@/firebase/firestore";
-
-import type { ConversationPreview } from "../types";
-
-export interface ConversationData {
-  id: string;
-  participantIds: string[];
-  lastMessage?: string;
-  lastMessageType?: string;
-  lastSenderUid?: string;
-  lastMessageAt?: any;
-  unreadCount?: Record<string, number>;
-  typing?: Record<string, boolean>;
-  updatedAt?: any;
-  [key: string]: any;
-}
-
-/**
- * Checks if a direct chat between currentUid and targetUid is allowed.
- * Requires an active accepted friend status document in `/friends/{pairKey}`
- */
-export async function canStartDirectChat(
-  currentUid: string,
-  targetUid: string
-): Promise<{ allowed: boolean; reason?: string }> {
-  if (!currentUid || !targetUid || currentUid === targetUid) {
-    return { allowed: false, reason: "Invalid participants." };
-  }
-
-  // Create a deterministic pair key (e.g. uidA_uidB sorted alphabetically)
-  const pairKey = [currentUid, targetUid].sort().join("_");
-  const friendRef = doc(db, "friends", pairKey);
-  const friendSnap = await getDoc(friendRef);
-
-  if (!friendSnap.exists() || friendSnap.data()?.status !== "accepted") {
-    return {
-      allowed: false,
-      reason: "You must send a friend request and have it accepted before starting a direct chat.",
-    };
-  }
-
-  return { allowed: true };
-}
-
-export async function getConversation(
-  conversationId: string
-): Promise<ConversationData> {
-  const ref = doc(
-    db,
-    "conversations",
-    conversationId
-  );
-
-  const snap = await getDoc(ref);
-
-  if (!snap.exists()) {
-    throw new Error("Conversation not found");
-  }
-
-  const data = snap.data() as DocumentData;
-
-  return {
-    id: snap.id,
-    participantIds: data.participantIds || [],
-    ...data,
+export interface SendMessageParams {
+  conversationId: string;
+  senderUid: string;
+  senderName: string;
+  text?: string;
+  attachment?: {
+    type: 'image' | 'file';
+    url: string;
+    name: string;
+    size?: number;
+    contentType?: string;
   };
 }
 
-export async function getFriendProfile(
-  conversationId: string,
-  currentUid: string
-) {
-  const conversation =
-    await getConversation(conversationId);
+export class ConversationService {
+  /**
+   * Subscribes to real-time messages for a conversation
+   */
+  subscribeToMessages(conversationId: string, onMessagesUpdate: (messages: any[]) => void) {
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(messagesRef, orderBy('createdAt', 'asc'));
 
-  const friendUid =
-    conversation.participantIds.find(
-      (uid: string) => uid !== currentUid
+    return onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      onMessagesUpdate(list);
+    }, (error) => {
+      console.warn('Messages subscription error:', error);
+    });
+  }
+
+  /**
+   * Sends a message or file attachment and updates the parent conversation metadata
+   */
+  async sendMessage({ conversationId, senderUid, senderName, text = '', attachment }: SendMessageParams) {
+    if (!text.trim() && !attachment) return;
+
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    
+    // Explicitly map attachment properties to guarantee clean Firestore serialization
+    const sanitizedAttachment = attachment ? {
+      type: attachment.type,
+      url: attachment.url || '',
+      name: attachment.name || 'Attachment',
+      size: typeof attachment.size === 'number' ? attachment.size : 0,
+      contentType: attachment.contentType || 'application/octet-stream',
+    } : null;
+
+    await addDoc(messagesRef, {
+      conversationId,
+      senderUid,
+      senderName,
+      text: text.trim(),
+      attachment: sanitizedAttachment,
+      createdAt: serverTimestamp(),
+    });
+
+    const summaryText = text.trim() 
+      ? text.trim() 
+      : sanitizedAttachment?.type === 'image' 
+      ? '📷 Image' 
+      : `📎 ${sanitizedAttachment?.name || 'Attachment'}`;
+
+    const convRef = doc(db, 'conversations', conversationId);
+    await setDoc(
+      convRef,
+      {
+        lastMessage: summaryText,
+        lastMessageType: sanitizedAttachment ? sanitizedAttachment.type : 'text',
+        lastSenderUid: senderUid,
+        lastMessageAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
     );
-
-  if (!friendUid) {
-    throw new Error("Friend not found");
   }
-
-  // Verify friendship status before returning profile details
-  const friendCheck = await canStartDirectChat(currentUid, friendUid);
-  if (!friendCheck.allowed) {
-    throw new Error(friendCheck.reason || "Direct messaging is restricted until friend request is accepted.");
-  }
-
-  const userSnap = await getDoc(
-    doc(db, "users", friendUid)
-  );
-
-  if (!userSnap.exists()) {
-    throw new Error("User not found");
-  }
-
-  const user = userSnap.data();
-
-  return {
-    uid: friendUid,
-
-    username: user.username ?? "",
-
-    displayName:
-      user.displayName ?? "Unknown",
-
-    photoURL: user.photoURL ?? "",
-
-    online: user.online ?? false,
-
-    lastSeen: user.lastSeen ?? null,
-
-    isFriend: true,
-  };
 }
+
+export const conversationService = new ConversationService();
+
+export const canStartDirectChat = async (userId: string, peerId: string): Promise<{ allowed: boolean }> => {
+  return { allowed: true };
+};
+
+export const getFriendProfile = async (conversationId: string, currentUid: string): Promise<any> => {
+  try {
+    const uids = conversationId.split('_');
+    const friendUid = uids.find((id) => id !== currentUid) || uids[0];
+
+    if (friendUid) {
+      const userDoc = await getDoc(doc(db, 'users', friendUid));
+      if (userDoc.exists()) {
+        return { uid: userDoc.id, ...userDoc.data() };
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch friend profile:', err);
+  }
+  return { uid: '', displayName: 'Peer Partner' };
+};

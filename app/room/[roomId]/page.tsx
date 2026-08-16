@@ -2,7 +2,7 @@
 
 import React, { use, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc, query, orderBy, serverTimestamp, updateDoc, deleteDoc, setDoc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/firebase/config';
 import { db } from '@/firebase/firestore';
@@ -17,13 +17,11 @@ import {
   Play,
   Square,
   Crown,
-  Lightbulb,
-  CheckCircle2,
-  Sparkle,
 } from 'lucide-react';
 import { checkMessageContent, logModerationViolation } from '@/features/moderation/services/moderationService';
 import { AI_VOICES, speakWithNamedVoice, stopNamedVoice } from '@/features/audio/services/namedVoiceService';
-import { generateCircleDeepResearch, SmartSolutionsSummary } from '@/features/research/services/deepResearchService';
+import { roomAiService } from '@/features/chat/services/roomAiService';
+import { aiInterventionsService } from '@/features/chat/services/aiInterventionsService';
 
 export default function RoomPage({ params }: { params: Promise<{ roomId: string }> }) {
   const resolvedParams = use(params);
@@ -40,7 +38,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [isPlayingVoice, setIsPlayingVoice] = useState<boolean>(false);
 
   const [isGeneratingSummary, setIsGeneratingSummary] = useState<boolean>(false);
-  const [summaryReport, setSummaryReport] = useState<SmartSolutionsSummary | null>(null);
 
   const [currentUser, setCurrentUser] = useState<{ uid: string; displayName: string }>({
     uid: 'guest_user',
@@ -49,18 +46,48 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. Centralized Auth State
+  // 1. Centralized Auth State & Automatic Room Registration for Real-time Sync
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        const uId = user.uid;
+        const uName = user.displayName || user.email?.split('@')[0] || 'Peer Member';
+        
         setCurrentUser({
-          uid: user.uid,
-          displayName: user.displayName || user.email?.split('@')[0] || 'Peer Member',
+          uid: uId,
+          displayName: uName,
         });
+
+        // Ensure room document exists and current user is registered as a member so Firestore rules permit access
+        if (roomId) {
+          try {
+            const roomRef = doc(db, 'rooms', roomId);
+            const snap = await getDoc(roomRef);
+            if (snap.exists()) {
+              const data = snap.data();
+              const members = data.memberUids || data.members || data.participants || [];
+              if (!members.includes(uId)) {
+                await updateDoc(roomRef, {
+                  memberUids: [...members, uId]
+                });
+              }
+            } else {
+              // Auto-create room doc if it doesn't exist yet with unified format
+              await setDoc(roomRef, {
+                topic: roomId.includes('_') ? roomId.split('_')[1] : 'General',
+                createdAt: serverTimestamp(),
+                memberUids: [uId],
+                status: 'active'
+              }, { merge: true });
+            }
+          } catch (err) {
+            console.warn('Room auto-join notice:', err);
+          }
+        }
       }
     });
     return () => unsub();
-  }, []);
+  }, [roomId]);
 
   // 2. Real-time Room & Messages Listeners
   useEffect(() => {
@@ -72,7 +99,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         const data = snap.data();
         setRoomData(data);
 
-        // Real-time Countdown calculation based on createdAt or endTime
         if (data.createdAt) {
           const createdMs = data.createdAt.seconds ? data.createdAt.seconds * 1000 : new Date(data.createdAt).getTime();
           const elapsedSecs = Math.floor((Date.now() - createdMs) / 1000);
@@ -112,6 +138,17 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     return () => clearInterval(timer);
   }, []);
 
+  // 3. Proactive AI Silence Interventions Check
+  useEffect(() => {
+    if (!roomId) return;
+    
+    const interventionInterval = setInterval(() => {
+      aiInterventionsService.checkAndTriggerSilenceNudge(roomId, AI_VOICES[selectedVoiceId].name);
+    }, 120000); // Check every 2 minutes
+
+    return () => clearInterval(interventionInterval);
+  }, [roomId, selectedVoiceId]);
+
   const handleSpeakText = (script: string) => {
     if (!isSpeakMode) return;
     setIsPlayingVoice(true);
@@ -147,15 +184,16 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     if (!roomId || messages.length === 0) return;
     setIsGeneratingSummary(true);
 
-    const messageTexts = messages.map((m) => m.text);
-    const topic = roomData?.topic || 'General';
+    try {
+      const aiReply = await roomAiService.requestAiSummaryAndSolutions(roomId, AI_VOICES[selectedVoiceId].name);
 
-    const report = await generateCircleDeepResearch(roomId, topic, messageTexts);
-    setSummaryReport(report);
-    setIsGeneratingSummary(false);
-
-    if (isSpeakMode) {
-      handleSpeakText(report.voiceSummaryScript);
+      if (isSpeakMode) {
+        handleSpeakText(aiReply);
+      }
+    } catch (err) {
+      console.error('Failed to generate AI insights:', err);
+    } finally {
+      setIsGeneratingSummary(false);
     }
   };
 
@@ -196,7 +234,32 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           reason: modResult.reason || 'Flagged for explicit wording.',
           severity: modResult.severity || 'medium',
         });
+        return;
       }
+
+      const lowerText = rawText.toLowerCase();
+      const isAddressingAi = 
+        lowerText.includes('hiba') || 
+        lowerText.includes('adal') || 
+        lowerText.includes('batool') || 
+        lowerText.includes('@ai') || 
+        lowerText.includes('help') ||
+        lowerText.includes('what should') ||
+        lowerText.includes('suggest');
+
+      if (isAddressingAi) {
+        setTimeout(async () => {
+          try {
+            const aiReply = await roomAiService.requestAiSummaryAndSolutions(roomId, AI_VOICES[selectedVoiceId].name);
+            if (isSpeakMode) {
+              handleSpeakText(aiReply);
+            }
+          } catch (aiErr) {
+            console.error('Auto AI response error:', aiErr);
+          }
+        }, 1000);
+      }
+
     } catch (err) {
       console.error('Failed to send message or save session memory:', err);
     }
@@ -211,7 +274,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const activeVoice = AI_VOICES[selectedVoiceId];
 
   return (
-    <main className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
+    <main className="flex flex-col h-screen bg-slate-950 text-slate-100 overflow-hidden relative" suppressHydrationWarning={true}>
       <header className="px-4 py-3 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 z-10 flex-shrink-0">
         <div>
           <h2 className="font-bold text-white text-sm sm:text-base capitalize flex items-center gap-2">
@@ -312,50 +375,6 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         </div>
       </div>
 
-      {summaryReport && (
-        <div className="m-4 p-5 rounded-2xl bg-slate-900 border border-amber-500/40 text-xs space-y-4 shadow-2xl relative animate-fade-in">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-              <Lightbulb className="w-4 h-4 text-amber-400" />
-              <span>Smart Suggestions & Possible Solutions</span>
-            </div>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-bold uppercase flex items-center gap-1">
-              <Crown className="w-3 h-3 fill-amber-400" /> Premium Summary
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2">
-              <h4 className="font-bold text-indigo-300 text-xs flex items-center gap-1.5 uppercase tracking-wider">
-                <Sparkle className="w-3.5 h-3.5 text-indigo-400" /> Smart Suggestions
-              </h4>
-              <ul className="space-y-1.5 text-slate-300">
-                {summaryReport.smartSuggestions.map((sug, i) => (
-                  <li key={i} className="flex items-start gap-2 text-slate-300">
-                    <span className="text-indigo-400 font-bold">•</span>
-                    <span>{sug}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2">
-              <h4 className="font-bold text-emerald-300 text-xs flex items-center gap-1.5 uppercase tracking-wider">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Possible Solutions
-              </h4>
-              <ul className="space-y-1.5 text-slate-300">
-                {summaryReport.possibleSolutions.map((sol, i) => (
-                  <li key={i} className="flex items-start gap-2 text-slate-300">
-                    <span className="text-emerald-400 font-bold">•</span>
-                    <span>{sol}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((m) => {
           if (m.type === 'system_warning' || m.senderUid === 'system_ai_moderator') {
@@ -376,15 +395,19 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           }
 
           const isMe = m.senderUid === currentUser.uid;
+          const isAiBot = m.senderUid === 'ai_host_bot' || m.type === 'ai_nudge';
+
           return (
             <div key={m.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
               <span className="text-[10px] text-slate-500 mb-1 px-1">
                 {isMe ? 'You' : m.senderName || 'Peer'}
               </span>
               <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed ${
+                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
                   isMe
                     ? 'bg-indigo-600 text-white rounded-br-none'
+                    : isAiBot
+                    ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-bl-none font-medium'
                     : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
                 }`}
               >
@@ -400,7 +423,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
         <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-4xl mx-auto">
           <input
             type="text"
-            placeholder="Share your thoughts with the group..."
+            placeholder="Share your thoughts or ask Hiba for help..."
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-500 text-xs sm:text-sm focus:outline-none focus:border-indigo-500 transition"

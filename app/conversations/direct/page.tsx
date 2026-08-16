@@ -12,13 +12,27 @@ import {
   doc,
   setDoc,
   getDocs,
+  getDoc,
   where,
   deleteDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
-import { Send, User, Sparkles, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell, Paperclip, Image as ImageIcon, X, Phone, Video, PhoneOff } from 'lucide-react';
+import { Send, User, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell, Paperclip, X, Phone, Video, PhoneOff } from 'lucide-react';
+
+import { callService } from '@/features/chat/services/callService';
+import { conversationService } from '@/features/chat/services/conversationService';
+import { callHistoryService } from '@/features/chat/services/callHistoryService';
+import { friendService } from '@/features/chat/services/friendService';
+import { notificationService } from '@/features/notifications/services/notificationService';
+
+import { IncomingCallBanner } from '@/features/chat/components/IncomingCallBanner';
+import { ActiveCall } from '@/features/chat/components/ActiveCall';
+import { CallHistory } from '@/features/chat/components/CallHistory';
+
+const storage = getStorage();
 
 export default function DirectChatsPage() {
   const router = useRouter();
@@ -31,65 +45,84 @@ export default function DirectChatsPage() {
   const [conversationId, setConversationId] = useState<string>('');
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
-  const [attachment, setAttachment] = useState<{ type: 'image' | 'file'; url: string; name: string } | null>(null);
+  
+  // File preview states
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
+  const [emojiCategory, setEmojiCategory] = useState<'smileys' | 'animals' | 'food' | 'activities' | 'travel' | 'objects' | 'symbols'>('smileys');
+
+  const emojiCategories = {
+    smileys: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎','🤓','🧐','😕','😟','🙁','😮','😯','😲','😳','😢','😭','😱','😖','😣','😤','😡','🤬','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖','😺','😸','😹','😻','😼','😽','🙀','😿','😾'],
+    animals: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐽','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🐣','🐥','🦆','🦢','🦉','🦅','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷️','🕸️','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🐪','🐫','🦒','🦘','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🐓','🦃','🦚','🦜','🦢','🦩','🕊️','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿️','🦔'],
+    food: ['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🌽','🥕','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🥨','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🦴','🌭','🍔','🍟','🍕','🥪','🥙','🧆','🌮','🌯','🥗','🥘','🥫','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥠','🥮','🍢','🍧','🍨','🍦','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🥛','🍼','☕','🍵','🧃','🥤','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🥄','🍴','🍽️','🥣','🥡','🥢','🧂'],
+    activities: ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🪃','🥅','⛳','🪁','🏹','🎣','🤿','🥊','🥋','🎽','🛹','🛼','🥌','🏂','🪂','🏋️‍♀️','🏋️‍♂️','🤼‍♀️','🤼‍♂️','🤸‍♀️','🤸‍♂️','⛹️‍♀️','⛹️‍♂️','🤺','🤾‍♀️','🤾‍♂️','🏌️‍♀️','🏌️‍♂️','🏇','🧘‍♀️','🧘‍♂️','🏄‍♀️','🏄‍♂️','🏊‍♀️','🏊‍♂️','🤽‍♀️','🤽‍♂️','🚣‍♀️','🚣‍♂️','🧗‍♀️','🧗‍♂️','🚵‍♀️','🚵‍♂️','🚴‍♀️','🚴‍♂️','🏆','🥇','🥈','🥉','🏅','🎖️','🎫','🎟️','🎪','🤹‍♀️','🤹‍♂️','🎭','🩰','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎺','🎸','🪕','🎻','🎲','♟️','🎯','🎳','🎮','🎰','🧩'],
+    travel: ['🚗','🚕','🚙','🚌','🚎','🏎️','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍️','🛵','🚲','🛺','🦽','🦼','🚨','🚔','🚍','🚘','🚖','🚡','🚠','🚟','🚃','🚋','🚄','🚅','🚆','🚇','🚂','🚝','🚞','🚏','🛤️','⛽','🔌','🚥','🚦','🚧','⚓','⛵','🚤','🛳️','🚢','✈️','🛩️','🛫','🛬','🪂','💺','🚁','🛰️','🚀','🛸','🛎️','⌛','⏳','⏰','⏱️','⏲️','🕰️','🕛','🕧','🕐','🕜','🕑','🕝','🕒','🕞','🕓','🕟','🕔','🕠','🕕','🕡','🕖','🕢','🕗','🕣','🕘','🕤','🕙','🕥','🕚','🕦'],
+    objects: ['⌚','📱','📲','💻','⌨️','🖥️','🖨️','🖱️','🖲️','🕹️','🗜️','💽','💾','💿','📀','📼','📷','📸','📹','🎥','📽️','🎞️','📞','☎️','📟','📠','📺','📻','🎙️','🎚️','🎛️','📡','🔋','🔌','💡','🔦','🕯️','🪔','🧯','🛢️','💸','💵','💴','💶','💷','🪙','💰','💳','💎','⚖️','🪜','🧰','🛠️','🔨','⚙️','🔗','⛓️','🪝','🧲','⚗️','🧪','🧫','🧬','🔬','🔭','💉','🩸','💊','🩹','🩺','🚪','🛏️','🛋️','🚽','🚿','🛁','🪒','🧽','🧴','🧻','🧹','🧺','🧷'],
+    symbols: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','⚛️','🈳','🈹','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','🔴','🟠','🟡','🟢','🔵','🟣','🟤','🔶','🔷','🔸','🔹','🔺','🔻','💠','🔘','🔲','🔳','💯','💢','💬','👁️‍🗨️','🗨️','🗯️','💭','💤']
+  };
+
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(false);
   const [notificationPermissionGranted, setNotificationPermissionGranted] = useState<boolean>(false);
 
   // Call states
   const [callActive, setCallActive] = useState<boolean>(false);
+  const [callStatus, setCallStatus] = useState<'ringing' | 'connected'>('ringing');
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
   const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video' } | null>(null);
+  const [callHistory, setCallHistory] = useState<any[]>([]);
+  const [showCallHistory, setShowCallHistory] = useState<boolean>(true);
+  
+  const incomingCallConversationRef = useRef<string | null>(null);
+  const callActiveRef = useRef(false);
+  const incomingCallRef = useRef<{ callerName: string; type: 'audio' | 'video' } | null>(null);
+  const callPeerNameRef = useRef<string | null>(null);
+  const callDirectionRef = useRef<'outgoing' | 'incoming' | null>(null);
+  const callHistorySavedRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   
-  // Ref storage for active call snapshot unsubscription handlers
-  const callUnsubRef = useRef<(() => void) | null>(null);
-  const candidatesUnsubRef = useRef<(() => void) | null>(null);
+  const ringtoneIntervalRef = useRef<any>(null);
 
-  const servers = {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  };
-
-  const emojiCategories = {
-    Smileys: ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😋', '😛'],
-    Gestures: ['👍', '👎', '👊', '✊', '🤛', '🤜', '🤞', '✌️', '🤟', '🤘', '👌', '🤌', '🤏', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚'],
-    Hearts: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❤️‍🔥', '❤️‍🩹', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟'],
-    Objects: ['💻', '📱', '⚡', '🔥', '✨', '💡', '🚀', '🎉', '🏆', '🎯', '📌', '📎', '🔑', '🔒', '🔔', '💬', '📢', '⭐', '🌟', '💥']
-  };
-
-  const playNotificationSound = () => {
+  const startRingtone = () => {
+    stopRingtone();
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContext) return;
       const ctx = new AudioContext();
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      ringtoneIntervalRef.current = setInterval(() => {
+        if (ctx.state === 'suspended') ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
 
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.setValueAtTime(480, ctx.currentTime + 0.2);
 
-      gain.gain.setValueAtTime(0.1, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
 
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      }, 2000);
     } catch (err) {
-      console.warn('Audio play blocked or unsupported:', err);
+      console.warn('Ringtone error:', err);
+    }
+  };
+
+  const stopRingtone = () => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
     }
   };
 
@@ -99,72 +132,105 @@ export default function DirectChatsPage() {
     }
   }, []);
 
-  const handleRequestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      alert('This browser does not support desktop notifications.');
-      return;
-    }
-
-    try {
-      const permission = await Notification.requestPermission();
-      setNotificationPermissionGranted(permission === 'granted');
-      if (permission === 'granted') {
-        new Notification('Notifications Enabled', {
-          body: 'You will now receive alerts for incoming messages and friend requests.',
-        });
-      } else {
-        alert('Notification permission was denied.');
-      }
-    } catch (err) {
-      console.error('Error requesting notification permission:', err);
-    }
+  const handleRegisterNotifications = async () => {
+    if (!currentUser) return;
+    await notificationService.registerDeviceToken(currentUser.uid);
+    setNotificationPermissionGranted(true);
   };
 
   useEffect(() => {
     const auth = getAuth();
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
-        const userData = {
+        setCurrentUser({
           uid: user.uid,
           displayName: user.displayName || user.email?.split('@')[0] || 'Peer Member',
-        };
-        setCurrentUser(userData);
+        });
         fetchPeersAndRelationships(user.uid);
       }
     });
     return () => unsub();
   }, []);
 
-  // Listen for active incoming calls globally across conversations
+  useEffect(() => {
+    callActiveRef.current = callActive;
+  }, [callActive]);
+
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
+
+  // Global realtime incoming call listener
   useEffect(() => {
     if (!currentUser?.uid) return;
 
-    const unsubConvs = onSnapshot(
-      query(collection(db, 'conversations'), where('participantIds', 'array-contains', currentUser.uid)),
-      (snapshot) => {
-        snapshot.docs.forEach((convDoc) => {
-          const convId = convDoc.id;
-          const callRef = doc(db, 'conversations', convId, 'calls', 'active_call');
+    const unsubscribeCallListeners = new Map<string, () => void>();
+    let disposed = false;
 
-          onSnapshot(callRef, (callSnap) => {
-            if (callSnap.exists()) {
-              const callData = callSnap.data();
-              if (callData.callerUid !== currentUser.uid && callData.status === 'ringing') {
-                setConversationId(convId);
-                setIncomingCall({
-                  callerName: callData.callerName || 'Peer',
-                  type: callData.type || 'audio',
-                });
-                playNotificationSound();
-              }
+    const syncCallListeners = (snapshot: any) => {
+      if (disposed) return;
+      const liveConversationIds = new Set<string>();
+
+      snapshot.docs.forEach((convDoc: any) => {
+        const convId = convDoc.id;
+        liveConversationIds.add(convId);
+
+        if (unsubscribeCallListeners.has(convId)) return;
+
+        const callRef = doc(db, 'conversations', convId, 'calls', 'active_call');
+        const unsubscribe = onSnapshot(callRef, (callSnap) => {
+          if (disposed) return;
+
+          if (!callSnap.exists()) {
+            if (callActiveRef.current || incomingCallRef.current) {
+              callService.cleanup();
+              setCallActive(false);
+              setIncomingCall(null);
+              stopRingtone();
             }
-          });
+            return;
+          }
+
+          const callData = callSnap.data();
+          if (callData.callerUid !== currentUser.uid && callData.status === 'ringing') {
+            incomingCallConversationRef.current = convId;
+            setIncomingCall((prev) => {
+              if (prev) return prev;
+              startRingtone();
+              notificationService.showNotification(
+                `Incoming ${callData.type === 'video' ? 'Video' : 'Audio'} Call`,
+                `${callData.callerName || 'Peer'} is calling you...`
+              );
+              return {
+                callerName: callData.callerName || 'Peer',
+                type: callData.type || 'audio',
+              };
+            });
+          }
         });
-      }
+
+        unsubscribeCallListeners.set(convId, unsubscribe);
+      });
+
+      unsubscribeCallListeners.forEach((unsubscribe, convId) => {
+        if (!liveConversationIds.has(convId)) {
+          unsubscribe();
+          unsubscribeCallListeners.delete(convId);
+        }
+      });
+    };
+
+    const unsubscribeConvs = onSnapshot(
+      query(collection(db, 'conversations'), where('participantIds', 'array-contains', currentUser.uid)),
+      syncCallListeners
     );
 
-    return () => unsubConvs();
-  }, [currentUser]);
+    return () => {
+      disposed = true;
+      unsubscribeConvs();
+      unsubscribeCallListeners.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [currentUser?.uid]);
 
   const fetchPeersAndRelationships = async (myUid: string) => {
     try {
@@ -176,520 +242,310 @@ export default function DirectChatsPage() {
           peers.push({
             uid: docSnap.id,
             displayName: data.displayName || data.email?.split('@')[0] || 'Peer Partner',
-            email: data.email || '',
           });
         }
       });
       setAvailablePeers(peers);
 
-      const friendsSnap = await getDocs(
-        query(collection(db, 'friends'), where('users', 'array-contains', myUid))
-      );
-      const sentReqSnap = await getDocs(
-        query(collection(db, 'friend_requests'), where('senderUid', '==', myUid))
-      );
-      const recvReqSnap = await getDocs(
-        query(collection(db, 'friend_requests'), where('receiverUid', '==', myUid))
-      );
-
-      const statusMap: Record<string, string> = {};
-
-      friendsSnap.forEach((d) => {
-        const data = d.data();
-        const otherUser = data.users.find((u: string) => u !== myUid);
-        if (otherUser) statusMap[otherUser] = 'friends';
+      friendService.subscribeToFriends(myUid, (friendUids) => {
+        const statusMap: Record<string, string> = {};
+        friendUids.forEach((uid) => { statusMap[uid] = 'friends'; });
+        setFriendships(statusMap);
+        const firstFriend = peers.find((p) => statusMap[p.uid] === 'friends');
+        if (firstFriend && !activePeer) setActivePeer(firstFriend);
       });
-
-      sentReqSnap.forEach((d) => {
-        const data = d.data();
-        statusMap[data.receiverUid] = 'pending_sent';
-      });
-
-      recvReqSnap.forEach((d) => {
-        const data = d.data();
-        statusMap[data.senderUid] = 'pending_received';
-      });
-
-      setFriendships(statusMap);
-
-      const firstFriendUid = peers.find((p) => statusMap[p.uid] === 'friends')?.uid;
-      if (firstFriendUid) {
-        const friendObj = peers.find((p) => p.uid === firstFriendUid);
-        setActivePeer(friendObj);
-      }
     } catch (err) {
-      console.error('Error fetching directory data:', err);
+      console.error('Directory fetch error:', err);
     }
   };
 
-  const handleSendFriendRequest = async (targetPeer: any) => {
+  const handleSendFriendRequest = async (peer: any) => {
     if (!currentUser) return;
     try {
-      await addDoc(collection(db, 'friend_requests'), {
-        senderUid: currentUser.uid,
-        senderName: currentUser.displayName,
-        receiverUid: targetPeer.uid,
-        receiverName: targetPeer.displayName,
-        status: 'pending',
-        createdAt: serverTimestamp(),
-      });
-      setFriendships((prev) => ({ ...prev, [targetPeer.uid]: 'pending_sent' }));
+      await friendService.sendFriendRequest(currentUser.uid, currentUser.displayName, peer.uid, peer.displayName);
+      setFriendships((prev) => ({ ...prev, [peer.uid]: 'pending_sent' }));
     } catch (err) {
-      console.error('Failed to send friend request:', err);
+      console.error('Failed to send request:', err);
     }
   };
 
-  const handleAcceptRequest = async (senderUid: string, senderName: string) => {
-    if (!currentUser) return;
-    try {
-      await addDoc(collection(db, 'friends'), {
-        users: [currentUser.uid, senderUid],
-        createdAt: serverTimestamp(),
-      });
-
-      const q = query(
-        collection(db, 'friend_requests'),
-        where('senderUid', '==', senderUid),
-        where('receiverUid', '==', currentUser.uid)
-      );
-      const snap = await getDocs(q);
-      snap.forEach(async (d) => {
-        await deleteDoc(doc(db, 'friend_requests', d.id));
-      });
-
-      setFriendships((prev) => ({ ...prev, [senderUid]: 'friends' }));
-      const newlyAcceptedPeer = availablePeers.find((p) => p.uid === senderUid);
-      if (newlyAcceptedPeer) {
-        setActivePeer(newlyAcceptedPeer);
-      }
-    } catch (err) {
-      console.error('Failed to accept friend request:', err);
-    }
-  };
-
+  // Ensure conversation document exists before loading chat or call subcollections
   useEffect(() => {
     if (!currentUser?.uid || !activePeer?.uid) return;
 
     const sortedUids = [currentUser.uid, activePeer.uid].sort();
-    const convId = `direct_${sortedUids[0]}_${sortedUids[1]}`;
-    setConversationId(convId);
+    const convId = sortedUids.join('_');
 
-    const convRef = doc(db, 'conversations', convId);
-    setDoc(
-      convRef,
-      {
-        conversationId: convId,
-        participantIds: sortedUids,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    ).catch((err) => console.warn('Conversation init non-fatal:', err));
-  }, [currentUser, activePeer]);
+    let isMounted = true;
+    const initConversation = async () => {
+      const ref = doc(db, 'conversations', convId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          participantIds: sortedUids,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+      if (isMounted) {
+        setConversationId(convId);
+      }
+    };
+
+    initConversation().catch((err) => console.error('Error initializing conversation:', err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.uid, activePeer?.uid]);
 
   useEffect(() => {
-    if (!conversationId || !currentUser?.uid) return;
+    if (!conversationId) return;
+    return conversationService.subscribeToMessages(conversationId, (list) => {
+      setMessages(list);
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    });
+  }, [conversationId]);
 
-    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+  useEffect(() => {
+    if (!conversationId) return;
+    return callHistoryService.subscribeToCallHistory(conversationId, (records) => {
+      setCallHistory(records);
+    });
+  }, [conversationId]);
 
-    let isInitialMessagesLoad = true;
-
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        if (isInitialMessagesLoad) {
-          isInitialMessagesLoad = false;
-        } else {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-              const data = change.doc.data();
-              if (data.senderUid !== currentUser?.uid) {
-                playNotificationSound();
-                if ('Notification' in window && Notification.permission === 'granted') {
-                  new Notification(`New message from ${data.senderName || 'Peer'}`, {
-                    body: data.text || 'Sent an attachment',
-                  });
-                }
-              }
-            }
-          });
-        }
-
-        const list: any[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() });
-        });
-        setMessages(list);
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-      },
-      (error) => {
-        console.warn('Snapshot listener error:', error);
-      }
-    );
-
-    return () => unsub();
-  }, [conversationId, currentUser]);
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    const isImage = file.type.startsWith('image/');
-    
-    reader.onload = (uploadEvent) => {
-      setAttachment({
-        type: isImage ? 'image' : 'file',
-        url: uploadEvent.target?.result as string,
-        name: file.name,
-      });
-    };
-    reader.readAsDataURL(file);
+    if (file.size > 15 * 1024 * 1024) { 
+      alert('File size exceeds 15 MB limit.'); 
+      return; 
+    }
+    setSelectedFile(file);
+    e.target.value = '';
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!text.trim() && !attachment) || !conversationId || !currentUser) return;
+    if ((!text.trim() && !selectedFile) || !conversationId || !currentUser || isUploading) return;
 
     const currentText = text.trim();
-    const currentAttachment = attachment;
+    const fileToSend = selectedFile;
+
+    // Reset inputs immediately
     setText('');
-    setAttachment(null);
-    setShowEmojiPicker(false);
-
-    await addDoc(collection(db, 'conversations', conversationId, 'messages'), {
-      conversationId,
-      senderUid: currentUser.uid,
-      senderName: currentUser.displayName,
-      text: currentText,
-      attachment: currentAttachment,
-      createdAt: serverTimestamp(),
-    });
-
-    await setDoc(
-      doc(db, 'conversations', conversationId),
-      {
-        lastMessage: currentText || (currentAttachment?.type === 'image' ? '📷 Image' : '📎 Attachment'),
-        lastSenderUid: currentUser.uid,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  };
-
-  const handleAddEmoji = (emoji: string) => {
-    setText((prev) => prev + emoji);
-  };
-
-  const formatMessageTime = (createdAt: any) => {
-    if (!createdAt) return 'Just now';
-    const date = createdAt.seconds ? new Date(createdAt.seconds * 1000) : new Date(createdAt);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Start Call and Create WebRTC Offer with strict TypeScript compatibility
-  const startCall = async (type: 'audio' | 'video') => {
-    if (!conversationId || !currentUser) return;
-    setCallType(type);
-    setCallActive(true);
+    setSelectedFile(null);
+    setIsUploading(true);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
-      });
-      
-      if (!peerConnectionRef.current && callActive === false) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
+      let attachmentPayload = null;
+
+      if (fileToSend) {
+        const safeName = fileToSend.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const fileRef = storageRef(storage, `chat_attachments/${conversationId}/${currentUser.uid}/${Date.now()}_${safeName}`);
+        const snap = await uploadBytes(fileRef, fileToSend);
+        const url = await getDownloadURL(snap.ref);
+
+        attachmentPayload = {
+          type: fileToSend.type.startsWith('image/') ? ('image' as const) : ('file' as const),
+          url: url,
+          name: fileToSend.name,
+          size: fileToSend.size,
+          contentType: fileToSend.type || 'application/octet-stream',
+        };
       }
 
-      localStreamRef.current = stream;
+      await conversationService.sendMessage({
+        conversationId,
+        senderUid: currentUser.uid,
+        senderName: currentUser.displayName,
+        text: currentText,
+        attachment: attachmentPayload || undefined,
+      });
+    } catch (err) {
+      console.error('Failed to send message or upload file:', err);
+      alert('Failed to send file attachment. Please try again.');
+      if (fileToSend) setSelectedFile(fileToSend);
+      if (currentText) setText(currentText);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const startCall = async (type: 'audio' | 'video') => {
+    if (!conversationId || !currentUser || !activePeer) return;
+    callPeerNameRef.current = activePeer.displayName;
+    callDirectionRef.current = 'outgoing';
+    callHistorySavedRef.current = false;
+    setCallType(type);
+    setCallActive(true);
+    setCallStatus('ringing');
+    startRingtone();
+
+    try {
+      const stream = await callService.startCall({
+        conversationId,
+        currentUserUid: currentUser.uid,
+        currentUserName: currentUser.displayName,
+        peerUid: activePeer.uid,
+        type,
+        onRemoteStream: (remoteStream) => {
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch(e => console.warn('Audio play:', e));
+          }
+        },
+        onCallConnected: () => {
+          setCallStatus('connected');
+          stopRingtone();
+          if (!callHistorySavedRef.current) {
+            callHistorySavedRef.current = true;
+            callHistoryService.logCall({
+              conversationId,
+              callerUid: currentUser.uid,
+              callerName: currentUser.displayName,
+              receiverUid: activePeer.uid,
+              type,
+              direction: 'outgoing',
+              status: 'accepted',
+            });
+          }
+        },
+        onCallEnded: () => endCall(),
+      });
+
       if (localVideoRef.current && type === 'video') {
         localVideoRef.current.srcObject = stream;
       }
-
-      const pc = new RTCPeerConnection(servers);
-      peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      const remoteStream = new MediaStream();
-      remoteStreamRef.current = remoteStream;
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
-        });
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-        }
-      };
-
-      const callDocRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
-      const iceCandidateQueue: RTCIceCandidateInit[] = [];
-
-      pc.onicecandidate = async (event) => {
-        if (event.candidate && peerConnectionRef.current) {
-          try {
-            await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
-          } catch (e) {
-            console.warn('Failed to add candidate:', e);
-          }
-        }
-      };
-
-      const offerDescription = await pc.createOffer();
-      await pc.setLocalDescription(offerDescription);
-
-      await setDoc(callDocRef, {
-        callerUid: currentUser.uid,
-        callerName: currentUser.displayName,
-        offer: { type: offerDescription.type, sdp: offerDescription.sdp },
-        type,
-        status: 'ringing',
-        createdAt: serverTimestamp(),
-      });
-
-      callUnsubRef.current = onSnapshot(callDocRef, async (snapshot) => {
-        if (!peerConnectionRef.current) return;
-        const data = snapshot.data();
-        if (!pc.currentRemoteDescription && data?.answer) {
-          try {
-            const answerDescription = new RTCSessionDescription(data.answer);
-            await pc.setRemoteDescription(answerDescription);
-
-            while (iceCandidateQueue.length > 0) {
-              const queuedCandidate = iceCandidateQueue.shift();
-              if (queuedCandidate && pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
-              }
-            }
-          } catch (e) {
-            console.warn('Error setting remote description or flushing candidates:', e);
-          }
-        }
-      });
-
-      candidatesUnsubRef.current = onSnapshot(collection(callDocRef, 'candidates'), async (snapshot) => {
-        if (!peerConnectionRef.current) return;
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added') {
-            const candidateData = change.doc.data();
-            try {
-              if (pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidateData));
-              } else {
-                iceCandidateQueue.push(candidateData);
-              }
-            } catch (e) {
-              console.warn('Error adding ice candidate:', e);
-            }
-          }
-        });
-      });
     } catch (err) {
-      console.error('Call initialization error:', err);
-      alert('Could not start media stream or access device permissions.');
+      console.error('Start call error:', err);
       endCall();
     }
   };
 
-  // Accept Incoming Call with strict TypeScript compatibility
   const acceptCall = async () => {
-    if (!conversationId || !currentUser) return;
+    stopRingtone();
+    const incomingConvId = incomingCallConversationRef.current;
+    if (!incomingConvId || !currentUser || !incomingCall) return;
+
+    const acceptedType = incomingCall.type;
+    callDirectionRef.current = 'incoming';
+    callHistorySavedRef.current = false;
+    setConversationId(incomingConvId);
     setIncomingCall(null);
     setCallActive(true);
+    setCallStatus('connected');
+    setCallType(acceptedType);
 
     try {
-      const callDocRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
-      
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: incomingCall?.type === 'video',
+      const stream = await callService.answerCall({
+        conversationId: incomingConvId,
+        currentUserUid: currentUser.uid,
+        currentUserName: currentUser.displayName,
+        peerUid: '',
+        type: acceptedType,
+        onRemoteStream: (remoteStream) => {
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch(e => console.warn('Audio play:', e));
+          }
+        },
+        onCallConnected: () => {
+          setCallStatus('connected');
+          if (!callHistorySavedRef.current) {
+            callHistorySavedRef.current = true;
+            callHistoryService.logCall({
+              conversationId: incomingConvId,
+              callerUid: '',
+              callerName: incomingCall.callerName,
+              receiverUid: currentUser.uid,
+              type: acceptedType,
+              direction: 'incoming',
+              status: 'accepted',
+            });
+          }
+        },
+        onCallEnded: () => endCall(),
       });
 
-      localStreamRef.current = stream;
-      if (localVideoRef.current && incomingCall?.type === 'video') {
+      if (localVideoRef.current && acceptedType === 'video') {
         localVideoRef.current.srcObject = stream;
       }
-
-      const pc = new RTCPeerConnection(servers);
-      peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      const remoteStream = new MediaStream();
-      remoteStreamRef.current = remoteStream;
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
-        });
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-        }
-      };
-
-      const iceCandidateQueue: RTCIceCandidateInit[] = [];
-
-      pc.onicecandidate = async (event) => {
-        if (event.candidate && peerConnectionRef.current) {
-          try {
-            await addDoc(collection(callDocRef, 'candidates'), event.candidate.toJSON());
-          } catch (e) {
-            console.warn('Failed to add candidate:', e);
-          }
-        }
-      };
-
-      callUnsubRef.current = onSnapshot(callDocRef, async (snapshot) => {
-        if (!peerConnectionRef.current) return;
-        const data = snapshot.data();
-        if (data?.offer && !pc.currentRemoteDescription) {
-          try {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-            const answerDescription = await pc.createAnswer();
-            await pc.setLocalDescription(answerDescription);
-
-            await updateDoc(callDocRef, {
-              answer: { type: answerDescription.type, sdp: answerDescription.sdp },
-              status: 'connected',
-            });
-
-            while (iceCandidateQueue.length > 0) {
-              const queuedCandidate = iceCandidateQueue.shift();
-              if (queuedCandidate && pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
-              }
-            }
-          } catch (e) {
-            console.warn('Error handling offer/answer setup:', e);
-          }
-        }
-      });
-
-      candidatesUnsubRef.current = onSnapshot(collection(callDocRef, 'candidates'), async (snapshot) => {
-        if (!peerConnectionRef.current) return;
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === 'added') {
-            const candidateData = change.doc.data();
-            try {
-              if (pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(candidateData));
-              } else {
-                iceCandidateQueue.push(candidateData);
-              }
-            } catch (e) {
-              console.warn('Error adding ice candidate:', e);
-            }
-          }
-        });
-      });
     } catch (err) {
-      console.error('Failed to accept call:', err);
+      console.error('Accept call error:', err);
       endCall();
     }
   };
 
-  // Reject Incoming Call
   const rejectCall = async () => {
-    setIncomingCall(null);
-    if (conversationId) {
-      try {
-        await deleteDoc(doc(db, 'conversations', conversationId, 'calls', 'active_call'));
-      } catch (err) {
-        console.warn('Call cleanup error:', err);
-      }
+    stopRingtone();
+    if (incomingCall && incomingCallConversationRef.current && currentUser) {
+      callHistoryService.logCall({
+        conversationId: incomingCallConversationRef.current,
+        callerUid: '',
+        callerName: incomingCall.callerName,
+        receiverUid: currentUser.uid,
+        type: incomingCall.type,
+        direction: 'incoming',
+        status: 'rejected',
+      });
     }
+    const convId = incomingCallConversationRef.current;
+    setIncomingCall(null);
+    incomingCallConversationRef.current = null;
+    if (convId) await callService.terminateCall(convId);
   };
 
-  // End Call & Cleanup
   const endCall = async () => {
-    if (callUnsubRef.current) {
-      callUnsubRef.current();
-      callUnsubRef.current = null;
+    stopRingtone();
+    const convId = incomingCallConversationRef.current || conversationId;
+    if (convId && currentUser && callDirectionRef.current && !callHistorySavedRef.current) {
+      callHistoryService.logCall({
+        conversationId: convId,
+        callerUid: currentUser.uid,
+        callerName: currentUser.displayName,
+        receiverUid: activePeer?.uid || '',
+        type: callType || 'audio',
+        direction: callDirectionRef.current,
+        status: callDirectionRef.current === 'incoming' ? 'missed' : 'cancelled',
+      });
+      callHistorySavedRef.current = true;
     }
-    if (candidatesUnsubRef.current) {
-      candidatesUnsubRef.current();
-      candidatesUnsubRef.current = null;
-    }
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
-      localStreamRef.current = null;
-    }
-    if (peerConnectionRef.current) {
-      try {
-        peerConnectionRef.current.close();
-      } catch (e) {
-        console.warn('Error closing peer connection:', e);
-      }
-      peerConnectionRef.current = null;
-    }
+    callService.cleanup();
     setCallActive(false);
     setIncomingCall(null);
     setCallType(null);
-
-    if (conversationId) {
-      try {
-        await deleteDoc(doc(db, 'conversations', conversationId, 'calls', 'active_call'));
-      } catch (err) {
-        console.warn('Call doc cleanup error:', err);
-      }
-    }
+    if (convId) await callService.terminateCall(convId);
   };
 
   return (
     <main className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative">
-      {/* INCOMING CALL MODAL POPUP */}
-      {incomingCall && (
-        <div className="absolute inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center p-6 space-y-6">
-          <div className="text-center space-y-3">
-            <div className="w-24 h-24 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-3xl font-bold text-indigo-300 mx-auto animate-bounce">
-              {incomingCall.callerName.slice(0, 2).toUpperCase()}
-            </div>
-            <h3 className="text-xl font-extrabold text-white">
-              Incoming {incomingCall.type === 'video' ? 'Video' : 'Audio'} Call
-            </h3>
-            <p className="text-sm text-slate-300">
-              <span className="font-bold text-indigo-400">{incomingCall.callerName}</span> is calling you...
-            </p>
-          </div>
+      <audio ref={remoteAudioRef} autoPlay playsInline controls={false} className="hidden" />
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={rejectCall}
-              className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-rose-600/30"
-            >
-              <PhoneOff className="w-4 h-4" /> Reject
-            </button>
-            <button
-              onClick={acceptCall}
-              className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-emerald-600/30"
-            >
-              <Phone className="w-4 h-4" /> Accept
-            </button>
-          </div>
-        </div>
+      {incomingCall && !callActive && (
+        <IncomingCallBanner
+          callerName={incomingCall.callerName}
+          type={incomingCall.type}
+          onAccept={acceptCall}
+          onReject={rejectCall}
+        />
       )}
 
-      {/* PEERS LIST SIDEBAR */}
-      <aside
-        className={`border-r border-slate-800 bg-slate-900 flex flex-col flex-shrink-0 transition-all duration-300 ${
-          isSidebarMinimized ? 'w-20' : 'w-80'
-        }`}
-      >
+      {/* SIDEBAR DIRECTORY */}
+      <aside className={`border-r border-slate-800 bg-slate-900 flex flex-col flex-shrink-0 transition-all duration-300 ${isSidebarMinimized ? 'w-20' : 'w-80'}`}>
         <div className="p-4 border-b border-slate-800 font-bold text-sm text-white flex items-center justify-between">
           {!isSidebarMinimized && (
             <span className="flex items-center gap-2 truncate">
-              <MessageSquare className="w-4 h-4 text-indigo-400 flex-shrink-0" />
-              Direct Chats
+              <MessageSquare className="w-4 h-4 text-indigo-400 flex-shrink-0" /> Direct Chats
             </span>
           )}
           <button
             type="button"
             onClick={() => setIsSidebarMinimized((prev) => !prev)}
             className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition mx-auto"
-            title={isSidebarMinimized ? 'Expand Directory' : 'Minimize Directory'}
+            title={isSidebarMinimized ? 'Expand Sidebar' : 'Minimize Sidebar'}
           >
             {isSidebarMinimized ? <PanelLeftOpen className="w-4 h-4 text-indigo-400" /> : <PanelLeftClose className="w-4 h-4 text-indigo-400" />}
           </button>
@@ -698,133 +554,73 @@ export default function DirectChatsPage() {
         {!isSidebarMinimized && !notificationPermissionGranted && (
           <div className="p-3 m-3 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex items-center justify-between gap-2">
             <div className="truncate">
-              <h5 className="text-[11px] font-bold text-white flex items-center gap-1">
-                <Bell className="w-3 h-3 text-indigo-400" /> Enable Alerts
-              </h5>
-              <p className="text-[10px] text-slate-400 truncate">Get push alerts for messages</p>
+              <h5 className="text-[11px] font-bold text-white flex items-center gap-1"><Bell className="w-3 h-3 text-indigo-400" /> Enable Alerts</h5>
+              <p className="text-[10px] text-slate-400 truncate">Get push alerts for incoming calls</p>
             </div>
-            <button
-              onClick={handleRequestNotificationPermission}
-              className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold transition shadow flex-shrink-0"
-            >
-              Allow
-            </button>
+            <button onClick={handleRegisterNotifications} className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-semibold transition">Allow</button>
           </div>
         )}
 
         <div className="p-2 space-y-1.5 overflow-y-auto flex-1">
-          {availablePeers.length === 0 ? (
-            !isSidebarMinimized && (
-              <div className="p-6 text-center text-xs text-slate-500 space-y-1">
-                <Users className="w-6 h-6 mx-auto text-slate-700 mb-2" />
-                <p>No other peers found.</p>
-              </div>
-            )
-          ) : (
-            availablePeers.map((peer) => {
-              const relation = friendships[peer.uid] || 'none';
-              const isSelected = activePeer?.uid === peer.uid;
-              const initials = peer.displayName ? peer.displayName.slice(0, 2).toUpperCase() : 'P';
+          {availablePeers.map((peer) => {
+            const relation = friendships[peer.uid] || 'none';
+            const isSelected = activePeer?.uid === peer.uid;
+            const initials = peer.displayName ? peer.displayName.slice(0, 2).toUpperCase() : 'P';
 
-              if (isSidebarMinimized) {
-                return (
-                  <div
-                    key={peer.uid}
-                    onClick={() => {
-                      if (relation === 'friends') {
-                        setActivePeer(peer);
-                      }
-                    }}
-                    title={peer.displayName}
-                    className={`w-12 h-12 mx-auto rounded-2xl flex items-center justify-center font-bold text-xs transition cursor-pointer relative ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
-                        : relation === 'friends'
-                        ? 'bg-slate-800 hover:bg-slate-700 text-indigo-300'
-                        : 'bg-slate-950/40 text-slate-500 opacity-60'
-                    }`}
-                  >
-                    {initials}
-                    {relation === 'pending_received' && (
-                      <span className="absolute top-0 right-0 w-3 h-3 rounded-full bg-amber-400 ring-2 ring-slate-900" />
-                    )}
-                  </div>
-                );
-              }
-
+            if (isSidebarMinimized) {
               return (
                 <div
                   key={peer.uid}
-                  onClick={() => {
-                    if (relation === 'friends') {
-                      setActivePeer(peer);
-                    }
-                  }}
-                  className={`p-3 rounded-2xl flex items-center justify-between gap-2 transition ${
-                    isSelected
-                      ? 'bg-indigo-600/20 border border-indigo-500/40 text-white'
-                      : relation === 'friends'
-                      ? 'bg-slate-950/60 border border-slate-800 hover:border-slate-700 cursor-pointer text-slate-300'
-                      : 'bg-slate-950/30 border border-slate-800/50 text-slate-400 opacity-80'
+                  onClick={() => relation === 'friends' && setActivePeer(peer)}
+                  title={peer.displayName}
+                  className={`w-12 h-12 mx-auto rounded-2xl flex items-center justify-center font-bold text-xs transition cursor-pointer ${
+                    isSelected ? 'bg-indigo-600 text-white shadow-lg' : relation === 'friends' ? 'bg-slate-800 text-indigo-300' : 'bg-slate-950/40 text-slate-500 opacity-60'
                   }`}
                 >
-                  <div className="flex items-center gap-3 truncate min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center font-bold text-indigo-300 text-xs flex-shrink-0">
-                      {initials}
-                    </div>
-                    <div className="truncate min-w-0">
-                      <h4 className="text-xs font-bold truncate">{peer.displayName}</h4>
-                      <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                        {relation === 'friends'
-                          ? 'Connected Friend'
-                          : relation === 'pending_sent'
-                          ? 'Request Pending'
-                          : relation === 'pending_received'
-                          ? 'Wants to connect'
-                          : 'Not connected'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex-shrink-0">
-                    {relation === 'friends' ? (
-                      <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Chat
-                      </span>
-                    ) : relation === 'pending_sent' ? (
-                      <span className="text-[10px] px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Sent
-                      </span>
-                    ) : relation === 'pending_received' ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAcceptRequest(peer.uid, peer.displayName);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 transition shadow"
-                      >
-                        Accept
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSendFriendRequest(peer);
-                        }}
-                        className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 transition shadow"
-                      >
-                        <UserPlus className="w-3 h-3" /> Add
-                      </button>
-                    )}
-                  </div>
+                  {initials}
                 </div>
               );
-            })
-          )}
+            }
+
+            return (
+              <div
+                key={peer.uid}
+                onClick={() => relation === 'friends' && setActivePeer(peer)}
+                className={`p-3 rounded-2xl flex items-center justify-between gap-2 transition ${
+                  isSelected ? 'bg-indigo-600/20 border border-indigo-500/40 text-white' : relation === 'friends' ? 'bg-slate-950/60 border border-slate-800 cursor-pointer text-slate-300' : 'bg-slate-950/30 border border-slate-800/50 text-slate-400 opacity-80'
+                }`}
+              >
+                <div className="flex items-center gap-3 truncate min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center font-bold text-indigo-300 text-xs flex-shrink-0">
+                    {initials}
+                  </div>
+                  <div className="truncate min-w-0">
+                    <h4 className="text-xs font-bold truncate">{peer.displayName}</h4>
+                    <p className="text-[10px] text-slate-400 truncate mt-0.5">{relation === 'friends' ? 'Connected Friend' : 'Not connected'}</p>
+                  </div>
+                </div>
+
+                <div className="flex-shrink-0">
+                  {relation === 'friends' ? (
+                    <span className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Chat
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleSendFriendRequest(peer); }}
+                      className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 transition"
+                    >
+                      <UserPlus className="w-3 h-3" /> Add
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </aside>
 
-      {/* CHAT WINDOW */}
+      {/* MAIN CHAT WINDOW */}
       <section className="flex-1 flex flex-col bg-slate-950 min-w-0 relative">
         {activePeer ? (
           <>
@@ -841,61 +637,37 @@ export default function DirectChatsPage() {
                 </div>
               </div>
 
-              {/* CALL ACTIONS */}
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => startCall('audio')}
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"
-                  title="Start Audio Call"
-                >
+                <button type="button" onClick={() => startCall('audio')} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 transition" title="Start Audio Call">
                   <Phone className="w-4 h-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => startCall('video')}
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 transition"
-                  title="Start Video Call"
-                >
+                <button type="button" onClick={() => startCall('video')} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 transition" title="Start Video Call">
                   <Video className="w-4 h-4" />
                 </button>
               </div>
             </header>
 
-            {/* CALL OVERLAY MODAL */}
             {callActive && (
-              <div className="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center p-6 space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="w-20 h-20 rounded-3xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-2xl font-bold text-indigo-300 mx-auto animate-pulse">
-                    {activePeer.displayName.slice(0, 2).toUpperCase()}
-                  </div>
-                  <h3 className="text-lg font-bold text-white">
-                    {callType === 'video' ? 'Video Call with' : 'Audio Call with'} {activePeer.displayName}
-                  </h3>
-                  <p className="text-xs text-emerald-400 font-medium">Connected • Secure Stream</p>
-                </div>
-
-                {callType === 'video' && (
-                  <div className="w-full max-w-2xl aspect-video bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden relative shadow-2xl flex">
-                    <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                    <div className="absolute bottom-4 right-4 w-32 aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-700 shadow-lg">
-                      <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={endCall}
-                    className="px-6 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-rose-600/30"
-                  >
-                    <PhoneOff className="w-4 h-4" /> End Call
-                  </button>
-                </div>
-              </div>
+              <ActiveCall
+                peerName={activePeer.displayName}
+                callType={callType}
+                callStatus={callStatus}
+                localVideoRef={localVideoRef}
+                remoteVideoRef={remoteVideoRef}
+                onEndCall={endCall}
+              />
             )}
 
-            {/* MESSAGES FEED */}
+            {showCallHistory && callHistory.length > 0 && (
+              <CallHistory history={callHistory} onHide={() => setShowCallHistory(false)} />
+            )}
+
+            {!showCallHistory && callHistory.length > 0 && (
+              <button type="button" onClick={() => setShowCallHistory(true)} className="mx-4 mt-3 self-start rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 text-[10px] font-bold text-indigo-400 hover:bg-slate-800 transition">
+                📞 Show call history ({callHistory.length})
+              </button>
+            )}
+
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2 text-slate-500">
@@ -906,37 +678,28 @@ export default function DirectChatsPage() {
                 messages.map((m) => {
                   const isMe = m.senderUid === currentUser?.uid;
                   return (
-                    <div
-                      key={m.id}
-                      className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
-                    >
+                    <div key={m.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                       <span className="text-[10px] text-slate-500 mb-1 px-1">
-                        {isMe ? 'You' : m.senderName || 'Peer'} • {formatMessageTime(m.createdAt)}
+                        {isMe ? 'You' : m.senderName || 'Peer'} • {m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
                       </span>
-                      <div
-                        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm space-y-2 leading-relaxed ${
-                          isMe
-                            ? 'bg-indigo-600 text-white rounded-br-none'
-                            : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
-                        }`}
-                      >
-                        {m.attachment && (
-                          <div className="rounded-xl overflow-hidden max-w-xs">
-                            {m.attachment.type === 'image' ? (
-                              <img src={m.attachment.url} alt="Uploaded attachment" className="w-full object-cover rounded-xl max-h-48" />
-                            ) : (
-                              <a
-                                href={m.attachment.url}
-                                download={m.attachment.name}
-                                className="flex items-center gap-2 p-2.5 bg-slate-950/60 rounded-xl text-xs font-semibold hover:bg-slate-950 transition"
-                              >
-                                <Paperclip className="w-4 h-4 text-indigo-400" />
-                                <span className="truncate">{m.attachment.name}</span>
-                              </a>
-                            )}
-                          </div>
+                      <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm space-y-2 leading-relaxed ${
+                        isMe ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
+                      }`}>
+                        {m.text && <p className="whitespace-pre-wrap break-words">{m.text}</p>}
+                        {m.attachment?.type === 'image' && (
+                          <a href={m.attachment.url} target="_blank" rel="noopener noreferrer" className="block">
+                            <img src={m.attachment.url} alt={m.attachment.name} className="max-w-full max-h-72 rounded-xl object-cover border border-white/10" />
+                          </a>
                         )}
-                        {m.text && <p>{m.text}</p>}
+                        {m.attachment?.type === 'file' && (
+                          <a href={m.attachment.url} target="_blank" rel="noopener noreferrer" download={m.attachment.name} className="flex items-center gap-3 rounded-xl bg-black/20 border border-white/10 px-3 py-2.5 hover:bg-black/30 transition">
+                            <span className="text-2xl">📎</span>
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold truncate">{m.attachment.name}</span>
+                              <span className="block text-[9px] opacity-60">{(m.attachment.size / 1024 / 1024).toFixed(2)} MB</span>
+                            </span>
+                          </a>
+                        )}
                       </div>
                     </div>
                   );
@@ -945,93 +708,52 @@ export default function DirectChatsPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* FULL EMOJI PICKER POPUP */}
-            {showEmojiPicker && (
-              <div className="absolute bottom-20 left-4 w-80 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-2xl z-20 space-y-3 max-h-72 overflow-y-auto">
-                {Object.entries(emojiCategories).map(([category, list]) => (
-                  <div key={category}>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">{category}</p>
-                    <div className="grid grid-cols-7 gap-1.5">
-                      {list.map((emoji, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => handleAddEmoji(emoji)}
-                          className="w-9 h-9 rounded-xl bg-slate-950 hover:bg-indigo-600/30 flex items-center justify-center text-lg transition"
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ATTACHMENT PREVIEW BAR */}
-            {attachment && (
-              <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2 truncate">
-                  {attachment.type === 'image' ? (
-                    <img src={attachment.url} alt="Preview" className="w-10 h-10 object-cover rounded-lg" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-                      <Paperclip className="w-5 h-5" />
-                    </div>
-                  )}
-                  <span className="text-xs text-slate-200 truncate">{attachment.name}</span>
-                </div>
-                <button
-                  onClick={() => setAttachment(null)}
-                  className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-
-            {/* COMPOSER */}
             <footer className="p-3 bg-slate-900 border-t border-slate-800 relative">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <form
-                onSubmit={handleSendMessage}
-                className="flex items-center gap-2 max-w-4xl mx-auto"
-              >
-                <button
-                  type="button"
-                  onClick={() => setShowEmojiPicker((prev) => !prev)}
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                  title="Insert Emoji"
-                >
-                  <Smile className="w-4 h-4 text-amber-400" />
-                </button>
+              {showEmojiPicker && (
+                <div className="absolute bottom-full left-3 mb-2 z-40 w-[min(380px,calc(100vw-24px))] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl p-3 flex flex-col">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+                    <span className="text-[11px] font-bold text-slate-300">😊 Full Emojis</span>
+                    <button type="button" onClick={() => setShowEmojiPicker(false)} className="text-slate-500 hover:text-white">✕</button>
+                  </div>
+                  <div className="grid grid-cols-8 gap-1 max-h-48 overflow-y-auto pr-1">
+                    {emojiCategories[emojiCategory].map((emoji, idx) => (
+                      <button key={`${emoji}-${idx}`} type="button" onClick={() => setText(prev => prev + emoji)} className="h-9 rounded-xl text-lg hover:bg-slate-800 transition flex items-center justify-center">
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                  title="Attach File or Image"
-                >
-                  <Paperclip className="w-4 h-4 text-indigo-400" />
-                </button>
+              {/* Attachment Preview Card */}
+              {selectedFile && (
+                <div className="mx-1 mb-2.5 p-2.5 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-3 shadow-lg">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex-shrink-0">
+                      <Paperclip className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs sm:text-sm text-slate-200 truncate font-medium">
+                      {selectedFile.name}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFile(null)}
+                    className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 transition flex-shrink-0"
+                    title="Remove attachment"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
 
-                <input
-                  type="text"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder={`Message ${activePeer.displayName}...`}
-                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
-                />
-                <button
-                  type="submit"
-                  className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-md shadow-indigo-600/20"
-                >
-                  <Send className="w-4 h-4" />
+              <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-w-4xl mx-auto">
+                <input ref={fileInputRef} type="file" onChange={handleFileSelect} className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" />
+                <button type="button" onClick={() => setShowEmojiPicker((v) => !v)} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 transition" title="Choose emoji">😊</button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 transition" title="Attach file">📎</button>
+                <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={isUploading ? 'Uploading file...' : `Message ${activePeer.displayName}...`} disabled={isUploading} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50" />
+                <button type="submit" disabled={(!text.trim() && !selectedFile) || isUploading} className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition shadow-md">
+                  <Send className={`w-4 h-4 ${isUploading ? 'animate-pulse' : ''}`} />
                 </button>
               </form>
             </footer>
@@ -1040,9 +762,6 @@ export default function DirectChatsPage() {
           <div className="h-full flex flex-col items-center justify-center text-slate-500 text-xs p-6 space-y-2">
             <Users className="w-10 h-10 text-slate-700 mb-1" />
             <p className="font-bold text-white text-sm">Select an Accepted Friend</p>
-            <p className="max-w-xs text-slate-400">
-              Direct messages require an accepted friend connection. Send or accept a request from the sidebar directory to chat.
-            </p>
           </div>
         )}
       </section>
