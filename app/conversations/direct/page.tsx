@@ -71,7 +71,7 @@ export default function DirectChatsPage() {
   const [callActive, setCallActive] = useState<boolean>(false);
   const [callStatus, setCallStatus] = useState<'ringing' | 'connected'>('ringing');
   const [callType, setCallType] = useState<'audio' | 'video' | null>(null);
-  const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video'; conversationId: string; callId: string } | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ callerName: string; type: 'audio' | 'video'; conversationId: string; callId: string; callerUid?: string } | null>(null);
   const [callHistory, setCallHistory] = useState<any[]>([]);
   const [showCallHistory, setShowCallHistory] = useState<boolean>(true);
   
@@ -184,6 +184,7 @@ export default function DirectChatsPage() {
             type: latestCall.type || 'audio',
             conversationId: latestCall.conversationId,
             callId: latestCall.callId,
+            callerUid: latestCall.callerUid,
           };
         });
       } else {
@@ -349,38 +350,10 @@ export default function DirectChatsPage() {
     setCallStatus('ringing');
     startRingtone();
 
-    // Listen for call acceptance from the receiver side in real-time
-    const activeCallRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
-    const unsubscribeActiveCall = onSnapshot(activeCallRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.status === 'connected') {
-          setCallStatus('connected');
-          stopRingtone();
-        }
-      }
-    });
-
     try {
-      await callService.createCall({
-        conversationId,
-        callerUid: currentUser.uid,
-        receiverUid: activePeer.uid,
-        type,
-        offer: {} as any,
-      });
+      await callService.clearStaleCandidates(conversationId);
 
-      await incomingCallService.sendIncomingCall({
-        receiverUid: activePeer.uid,
-        callId: conversationId,
-        conversationId,
-        callerUid: currentUser.uid,
-        callerName: currentUser.displayName,
-        type,
-        offer: {} as any,
-      });
-
-      const stream = await callService.startCall({
+      const localStream = await callService.startCall({
         conversationId,
         currentUserUid: currentUser.uid,
         currentUserName: currentUser.displayName,
@@ -396,31 +369,135 @@ export default function DirectChatsPage() {
         onCallConnected: () => {
           setCallStatus('connected');
           stopRingtone();
-          if (!callHistorySavedRef.current) {
-            callHistorySavedRef.current = true;
-            callHistoryService.logCall({
-              conversationId,
-              callerUid: currentUser.uid,
-              callerName: currentUser.displayName,
-              receiverUid: activePeer.uid,
-              type,
-              direction: 'outgoing',
-              status: 'accepted',
-            });
-          }
         },
-        onCallEnded: () => {
-          unsubscribeActiveCall();
-          endCall();
-        },
+        onCallEnded: () => endCall(),
       });
 
       if (localVideoRef.current && type === 'video') {
-        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.srcObject = localStream;
       }
+
+      const pc = callService.createPeerConnection(
+        (remoteStream) => {
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch(() => {});
+          }
+        },
+        (state) => {
+          if (state === 'connected') {
+            setCallStatus('connected');
+            stopRingtone();
+          } else if (state === 'failed' || state === 'disconnected') {
+            endCall();
+          }
+        }
+      );
+
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+      const candidateQueue: RTCIceCandidateInit[] = [];
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(
+            collection(db, 'conversations', conversationId, 'calls', 'active_call', 'candidates'),
+            {
+              candidate: event.candidate.toJSON(),
+              senderUid: currentUser.uid,
+              createdAt: serverTimestamp(),
+            }
+          );
+        }
+      };
+
+      const candidatesRef = collection(db, 'conversations', conversationId, 'calls', 'active_call', 'candidates');
+      onSnapshot(candidatesRef, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.senderUid !== currentUser.uid && data.candidate) {
+              const iceCandidate = new RTCIceCandidate(data.candidate);
+              if (pc.remoteDescription && pc.remoteDescription.type) {
+                try {
+                  await pc.addIceCandidate(iceCandidate);
+                } catch (e) {
+                  console.warn('Error adding received ice candidate', e);
+                }
+              } else {
+                candidateQueue.push(data.candidate);
+              }
+            }
+          }
+        });
+      });
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await callService.createCall({
+        conversationId,
+        callerUid: currentUser.uid,
+        receiverUid: activePeer.uid,
+        type,
+        offer,
+      });
+
+      await incomingCallService.sendIncomingCall({
+        receiverUid: activePeer.uid,
+        callId: conversationId,
+        conversationId,
+        callerUid: currentUser.uid,
+        callerName: currentUser.displayName,
+        type,
+        offer,
+      });
+
+      const activeCallRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
+      const unsubscribeActiveCall = onSnapshot(activeCallRef, async (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.status === 'connected') {
+            setCallStatus('connected');
+            stopRingtone();
+
+            if (data.answer && pc.signalingState === 'have-local-offer') {
+              try {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                
+                while (candidateQueue.length > 0) {
+                  const queuedCandidate = candidateQueue.shift();
+                  if (queuedCandidate) {
+                    try {
+                      await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+                    } catch (e) {
+                      console.warn('Error adding queued ice candidate', e);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.warn('Failed to set remote answer description:', e);
+              }
+            }
+
+            if (!callHistorySavedRef.current) {
+              callHistorySavedRef.current = true;
+              callHistoryService.logCall({
+                conversationId,
+                callerUid: currentUser.uid,
+                callerName: currentUser.displayName,
+                receiverUid: activePeer.uid,
+                type,
+                direction: 'outgoing',
+                status: 'accepted',
+              });
+            }
+          }
+        }
+      });
     } catch (err) {
       console.error('Start call error:', err);
-      unsubscribeActiveCall();
       endCall();
     }
   };
@@ -445,7 +522,7 @@ export default function DirectChatsPage() {
     setCallType(acceptedType);
 
     try {
-      const stream = await callService.answerCall({
+      const localStream = await callService.answerCall({
         conversationId: incomingConvId,
         currentUserUid: currentUser.uid,
         currentUserName: currentUser.displayName,
@@ -458,26 +535,104 @@ export default function DirectChatsPage() {
             remoteAudioRef.current.play().catch(e => console.warn('Audio play:', e));
           }
         },
-        onCallConnected: () => {
-          setCallStatus('connected');
-          if (!callHistorySavedRef.current) {
-            callHistorySavedRef.current = true;
-            callHistoryService.logCall({
-              conversationId: incomingConvId,
-              callerUid: '',
-              callerName: incomingCall.callerName,
-              receiverUid: currentUser.uid,
-              type: acceptedType,
-              direction: 'incoming',
-              status: 'accepted',
-            });
-          }
-        },
+        onCallConnected: () => setCallStatus('connected'),
         onCallEnded: () => endCall(),
       });
 
       if (localVideoRef.current && acceptedType === 'video') {
-        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      const pc = callService.createPeerConnection(
+        (remoteStream) => {
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteAudioRef.current.play().catch(() => {});
+          }
+        },
+        (state) => {
+          if (state === 'connected') {
+            setCallStatus('connected');
+          } else if (state === 'failed' || state === 'disconnected') {
+            endCall();
+          }
+        }
+      );
+
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+      const candidateQueue: RTCIceCandidateInit[] = [];
+
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(
+            collection(db, 'conversations', incomingConvId, 'calls', 'active_call', 'candidates'),
+            {
+              candidate: event.candidate.toJSON(),
+              senderUid: currentUser.uid,
+              createdAt: serverTimestamp(),
+            }
+          );
+        }
+      };
+
+      const candidatesRef = collection(db, 'conversations', incomingConvId, 'calls', 'active_call', 'candidates');
+      onSnapshot(candidatesRef, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.senderUid !== currentUser.uid && data.candidate) {
+              const iceCandidate = new RTCIceCandidate(data.candidate);
+              if (pc.remoteDescription && pc.remoteDescription.type) {
+                try {
+                  await pc.addIceCandidate(iceCandidate);
+                } catch (e) {
+                  console.warn('Error adding received ice candidate', e);
+                }
+              } else {
+                candidateQueue.push(data.candidate);
+              }
+            }
+          }
+        });
+      });
+
+      const activeCallRef = doc(db, 'conversations', incomingConvId, 'calls', 'active_call');
+      const activeCallSnap = await getDoc(activeCallRef);
+
+      if (activeCallSnap.exists() && activeCallSnap.data().offer) {
+        const offer = activeCallSnap.data().offer;
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+        while (candidateQueue.length > 0) {
+          const queuedCandidate = candidateQueue.shift();
+          if (queuedCandidate) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(queuedCandidate));
+            } catch (e) {
+              console.warn('Error adding queued ice candidate', e);
+            }
+          }
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        await callService.acceptCall(incomingConvId, answer);
+      }
+
+      if (!callHistorySavedRef.current) {
+        callHistorySavedRef.current = true;
+        callHistoryService.logCall({
+          conversationId: incomingConvId,
+          callerUid: incomingCall.callerUid || '',
+          callerName: incomingCall.callerName,
+          receiverUid: currentUser.uid,
+          type: acceptedType,
+          direction: 'incoming',
+          status: 'accepted',
+        });
       }
     } catch (err) {
       console.error('Accept call error:', err);

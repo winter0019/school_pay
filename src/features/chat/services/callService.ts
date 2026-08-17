@@ -56,44 +56,96 @@ export interface CallHistory {
 
 export const CALL_TIMEOUT_MS = 30_000;
 
+/**
+ * ICE / WebRTC configuration using Metered TURN and Google STUN servers.
+ */
+export const RTC_CONFIGURATION: RTCConfiguration = {
+  iceServers: [
+    // Google public STUN servers
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+
+    // Metered TURN server configuration loaded from environment variables
+    ...(typeof window !== 'undefined' &&
+    process.env.NEXT_PUBLIC_TURN_URL &&
+    process.env.NEXT_PUBLIC_TURN_USERNAME &&
+    process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+      ? [
+          {
+            urls: [
+              process.env.NEXT_PUBLIC_TURN_URL,
+              process.env.NEXT_PUBLIC_TURN_URL.replace(/^turn:/, 'turns:'),
+            ],
+            username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+            credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+          },
+        ]
+      : []),
+  ],
+  iceTransportPolicy: 'all',
+  bundlePolicy: 'max-bundle',
+  rtcpMuxPolicy: 'require',
+};
+
+/**
+ * Create a properly configured RTCPeerConnection with Metered TURN support.
+ */
+export const createPeerConnection = (
+  onRemoteStream?: (stream: MediaStream) => void,
+  onConnectionStateChange?: (state: RTCPeerConnectionState) => void
+): RTCPeerConnection => {
+  const peerConnection = new RTCPeerConnection(RTC_CONFIGURATION);
+
+  peerConnection.ontrack = (event) => {
+    console.log('[WebRTC] Remote track received:', event.track.kind);
+    let remoteStream = event.streams?.[0];
+    if (!remoteStream) {
+      remoteStream = new MediaStream();
+      remoteStream.addTrack(event.track);
+    }
+    onRemoteStream?.(remoteStream);
+  };
+
+  peerConnection.onconnectionstatechange = () => {
+    const state = peerConnection.connectionState;
+    console.log('[WebRTC] connection state:', state);
+    onConnectionStateChange?.(state);
+  };
+
+  peerConnection.oniceconnectionstatechange = () => {
+    console.log('[WebRTC] ICE connection state:', peerConnection.iceConnectionState);
+    if (peerConnection.iceConnectionState === 'failed') {
+      console.error('[WebRTC] ICE failed. Verifying TURN server relay routing.');
+    }
+  };
+
+  peerConnection.onicegatheringstatechange = () => {
+    console.log('[WebRTC] ICE gathering state:', peerConnection.iceGatheringState);
+  };
+
+  peerConnection.onsignalingstatechange = () => {
+    console.log('[WebRTC] signaling state:', peerConnection.signalingState);
+  };
+
+  return peerConnection;
+};
+
 const getConversationId = (uidA: string, uidB: string): string => {
   return [uidA, uidB].sort().join('_');
 };
 
 const getActiveCallRef = (conversationId: string) => {
-  return doc(
-    db,
-    'conversations',
-    conversationId,
-    'calls',
-    'active_call'
-  );
+  return doc(db, 'conversations', conversationId, 'calls', 'active_call');
 };
 
 export const callService = {
   getConversationId,
+  createPeerConnection,
 
-  /**
-   * Compatibility cleanup method.
-   *
-   * The actual WebRTC peer connection and media stream should be
-   * cleaned up by the component that owns them.
-   *
-   * This method intentionally remains available because older
-   * page.tsx code calls callService.cleanup().
-   */
-  cleanup(): void {
-    // Intentionally empty.
-    // WebRTC resources are owned by the calling component.
-  },
+  cleanup(): void {},
 
-  /**
-   * Start an outgoing call.
-   *
-   * NOTE:
-   * WebRTC signaling/ICE handling should be performed by the
-   * calling component or the dedicated WebRTC implementation.
-   */
   async startCall(config: {
     conversationId: string;
     currentUserUid: string;
@@ -104,21 +156,14 @@ export const callService = {
     onCallEnded: () => void;
     onCallConnected: () => void;
   }): Promise<MediaStream> {
+    console.log('[WebRTC] Starting local media:', config.type);
     const localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: config.type === 'video',
     });
-
     return localStream;
   },
 
-  /**
-   * Answer an incoming call.
-   */
   async answerCall(config: {
     conversationId: string;
     currentUserUid: string;
@@ -130,29 +175,18 @@ export const callService = {
     onCallConnected: () => void;
   }): Promise<MediaStream> {
     const callType = config.type || 'audio';
-
+    console.log('[WebRTC] Answering call:', callType);
     const localStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: callType === 'video',
     });
-
     return localStream;
   },
 
-  /**
-   * Terminate the active call.
-   */
   async terminateCall(conversationId: string): Promise<void> {
     await this.removeActiveCall(conversationId);
   },
 
-  /**
-   * Create the shared active-call document.
-   */
   async createCall(params: {
     conversationId: string;
     callerUid: string;
@@ -171,17 +205,7 @@ export const callService = {
     });
   },
 
-  /**
-   * Accept an active call.
-   *
-   * IMPORTANT:
-   * The status is changed to "connected" here so the caller and
-   * receiver both receive the same state through onSnapshot().
-   */
-  async acceptCall(
-    conversationId: string,
-    answer: RTCSessionDescriptionInit
-  ): Promise<void> {
+  async acceptCall(conversationId: string, answer: RTCSessionDescriptionInit): Promise<void> {
     await updateDoc(getActiveCallRef(conversationId), {
       answer,
       status: 'connected',
@@ -189,46 +213,25 @@ export const callService = {
     });
   },
 
-  /**
-   * Explicitly synchronize the active call status.
-   */
   async updateActiveCallStatus(
     conversationId: string,
     status: 'ringing' | 'connected' | 'ending'
   ): Promise<void> {
     try {
-      await updateDoc(getActiveCallRef(conversationId), {
-        status,
-      });
+      await updateDoc(getActiveCallRef(conversationId), { status });
     } catch (error) {
-      console.warn(
-        'Failed to update active call status:',
-        error
-      );
+      console.warn('[WebRTC] Failed to update active call status:', error);
     }
   },
 
-  /**
-   * Remove the active call document.
-   */
-  async removeActiveCall(
-    conversationId: string
-  ): Promise<void> {
+  async removeActiveCall(conversationId: string): Promise<void> {
     try {
-      await deleteDoc(
-        getActiveCallRef(conversationId)
-      );
+      await deleteDoc(getActiveCallRef(conversationId));
     } catch (error) {
-      console.warn(
-        'Active call already removed:',
-        error
-      );
+      console.warn('[WebRTC] Active call already removed:', error);
     }
   },
 
-  /**
-   * Save call history.
-   */
   async writeCallHistory(params: {
     conversationId: string;
     callerUid: string;
@@ -241,50 +244,24 @@ export const callService = {
     endedAt?: Date;
     durationSeconds?: number;
   }): Promise<string> {
-    const callsRef = collection(
-      db,
-      'conversations',
-      params.conversationId,
-      'calls'
-    );
-
+    const callsRef = collection(db, 'conversations', params.conversationId, 'calls');
     const result = await addDoc(callsRef, {
       recordType: 'history',
-
       callerUid: params.callerUid,
       receiverUid: params.receiverUid,
-
       type: params.type,
       direction: params.direction,
       status: params.status,
-
       startedAt: params.startedAt || null,
       answeredAt: params.answeredAt || null,
       endedAt: params.endedAt || null,
-
-      durationSeconds:
-        params.durationSeconds || 0,
-
+      durationSeconds: params.durationSeconds || 0,
       createdAt: serverTimestamp(),
     });
-
     return result.id;
   },
 
-  /**
-   * Listen to the active call document.
-   *
-   * This is the important listener for:
-   *
-   * ringing
-   * connected
-   * ending
-   * deleted
-   */
-  subscribeToActiveCall(
-    conversationId: string,
-    callback: (call: ActiveCall | null) => void
-  ) {
+  subscribeToActiveCall(conversationId: string, callback: (call: ActiveCall | null) => void) {
     return onSnapshot(
       getActiveCallRef(conversationId),
       (snapshot) => {
@@ -292,119 +269,55 @@ export const callService = {
           callback(null);
           return;
         }
-
         const data = snapshot.data();
-
         callback({
           callId: snapshot.id,
           conversationId,
-
           callerUid: data.callerUid,
           receiverUid: data.receiverUid,
-
           type: data.type,
           status: data.status,
-
           offer: data.offer,
           answer: data.answer,
-
           createdAt: data.createdAt,
           expiresAt: data.expiresAt,
           answeredAt: data.answeredAt,
         });
       },
       (error) => {
-        console.error(
-          'Active call subscription error:',
-          error
-        );
-
+        console.error('[WebRTC] Active call subscription error:', error);
         callback(null);
       }
     );
   },
 
-  /**
-   * Subscribe to call history.
-   */
-  subscribeToCallHistory(
-    conversationId: string,
-    callback: (calls: CallHistory[]) => void
-  ) {
+  subscribeToCallHistory(conversationId: string, callback: (calls: CallHistory[]) => void) {
     return onSnapshot(
-      collection(
-        db,
-        'conversations',
-        conversationId,
-        'calls'
-      ),
+      collection(db, 'conversations', conversationId, 'calls'),
       (snapshot) => {
         const calls = snapshot.docs
           .map((item) => ({
             callId: item.id,
             conversationId,
-
-            ...(item.data() as Omit<
-              CallHistory,
-              'callId' | 'conversationId'
-            >),
+            ...(item.data() as Omit<CallHistory, 'callId' | 'conversationId'>),
           }))
-          .filter(
-            (call) =>
-              (call as any).recordType === 'history'
-          )
-          .sort((a: any, b: any) => {
-            const aTime =
-              a.createdAt?.seconds || 0;
-
-            const bTime =
-              b.createdAt?.seconds || 0;
-
-            return bTime - aTime;
-          });
-
+          .filter((call) => (call as any).recordType === 'history')
+          .sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
         callback(calls);
       },
       (error) => {
-        console.error(
-          'Call history subscription error:',
-          error
-        );
+        console.error('[WebRTC] Call history subscription error:', error);
       }
     );
   },
 
-  /**
-   * Remove stale ICE candidates.
-   */
-  async clearStaleCandidates(
-    conversationId: string,
-    callId = 'active_call'
-  ): Promise<void> {
-    const candidatesRef = collection(
-      db,
-      'conversations',
-      conversationId,
-      'calls',
-      callId,
-      'candidates'
-    );
-
+  async clearStaleCandidates(conversationId: string, callId = 'active_call'): Promise<void> {
+    const candidatesRef = collection(db, 'conversations', conversationId, 'calls', callId, 'candidates');
     try {
-      const snapshot = await getDocs(
-        candidatesRef
-      );
-
-      await Promise.all(
-        snapshot.docs.map((candidate) =>
-          deleteDoc(candidate.ref)
-        )
-      );
+      const snapshot = await getDocs(candidatesRef);
+      await Promise.all(snapshot.docs.map((candidate) => deleteDoc(candidate.ref)));
     } catch (error) {
-      console.warn(
-        'Failed to clear stale ICE candidates:',
-        error
-      );
+      console.warn('[WebRTC] Failed to clear stale ICE candidates:', error);
     }
   },
 };
