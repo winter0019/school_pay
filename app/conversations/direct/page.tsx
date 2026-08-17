@@ -349,6 +349,18 @@ export default function DirectChatsPage() {
     setCallStatus('ringing');
     startRingtone();
 
+    // Listen for call acceptance from the receiver side in real-time
+    const activeCallRef = doc(db, 'conversations', conversationId, 'calls', 'active_call');
+    const unsubscribeActiveCall = onSnapshot(activeCallRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.status === 'connected') {
+          setCallStatus('connected');
+          stopRingtone();
+        }
+      }
+    });
+
     try {
       await callService.createCall({
         conversationId,
@@ -397,7 +409,10 @@ export default function DirectChatsPage() {
             });
           }
         },
-        onCallEnded: () => endCall(),
+        onCallEnded: () => {
+          unsubscribeActiveCall();
+          endCall();
+        },
       });
 
       if (localVideoRef.current && type === 'video') {
@@ -405,6 +420,7 @@ export default function DirectChatsPage() {
       }
     } catch (err) {
       console.error('Start call error:', err);
+      unsubscribeActiveCall();
       endCall();
     }
   };
