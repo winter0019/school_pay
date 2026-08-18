@@ -16,11 +16,12 @@ import {
   where,
   deleteDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
 import { db } from '@/firebase/firestore';
-import { Send, User, MessageSquare, Users, UserPlus, CheckCircle2, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell, Paperclip, X, Phone, Video, PhoneOff } from 'lucide-react';
+import { Send, User, MessageSquare, Users, UserPlus, CheckCircle2, Check, Clock, Smile, PanelLeftClose, PanelLeftOpen, Bell, Paperclip, X, Phone, Video, PhoneOff } from 'lucide-react';
 
 import { callService } from '@/features/chat/services/callService';
 import { conversationService } from '@/features/chat/services/conversationService';
@@ -46,6 +47,10 @@ export default function DirectChatsPage() {
   const [conversationId, setConversationId] = useState<string>('');
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
+  
+  // Typing indicators & Read receipt states
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<any>(null);
   
   // File preview states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -267,13 +272,51 @@ export default function DirectChatsPage() {
     };
   }, [currentUser?.uid, activePeer?.uid]);
 
+  // Subscribe to Messages and mark unread incoming messages as 'read'
   useEffect(() => {
-    if (!conversationId) return;
-    return conversationService.subscribeToMessages(conversationId, (list) => {
+    if (!conversationId || !currentUser?.uid) return;
+    return conversationService.subscribeToMessages(conversationId, async (list) => {
       setMessages(list);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+      // Check for unread messages sent by the peer and update their status to 'read'
+      const unreadDocs: any[] = [];
+      list.forEach((m) => {
+        if (m.senderUid !== currentUser.uid && m.status !== 'read') {
+          unreadDocs.push(m.id);
+        }
+      });
+
+      if (unreadDocs.length > 0) {
+        try {
+          const batch = writeBatch(db);
+          unreadDocs.forEach((msgId) => {
+            const msgRef = doc(db, 'conversations', conversationId, 'messages', msgId);
+            batch.update(msgRef, { status: 'read' });
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error('Failed to mark read receipts:', err);
+        }
+      }
     });
-  }, [conversationId]);
+  }, [conversationId, currentUser?.uid]);
+
+  // Subscribe to typing indicators
+  useEffect(() => {
+    if (!conversationId || !currentUser?.uid) return;
+    const typingColRef = collection(db, 'conversations', conversationId, 'typing');
+    const unsubTyping = onSnapshot(typingColRef, (snapshot) => {
+      const activeTyping: string[] = [];
+      snapshot.forEach((docSnap) => {
+        if (docSnap.id !== currentUser.uid) {
+          activeTyping.push(docSnap.data().displayName);
+        }
+      });
+      setTypingUsers(activeTyping);
+    });
+    return () => unsubTyping();
+  }, [conversationId, currentUser?.uid]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -293,6 +336,25 @@ export default function DirectChatsPage() {
     e.target.value = '';
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setText(val);
+
+    if (!conversationId || !currentUser) return;
+
+    // Set typing status to true
+    const typingRef = doc(db, 'conversations', conversationId, 'typing', currentUser.uid);
+    setDoc(typingRef, { displayName: currentUser.displayName, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+
+    // Clear previous timeout and set new one to turn off typing after 2 seconds of inactivity
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(async () => {
+      try {
+        await deleteDoc(typingRef);
+      } catch (err) {}
+    }, 2000);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((!text.trim() && !selectedFile) || !conversationId || !currentUser || isUploading) return;
@@ -300,10 +362,16 @@ export default function DirectChatsPage() {
     const currentText = text.trim();
     const fileToSend = selectedFile;
 
-    // Reset inputs immediately
+    // Reset inputs immediately & clear typing indicator instantly
     setText('');
     setSelectedFile(null);
     setIsUploading(true);
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    try {
+      const typingRef = doc(db, 'conversations', conversationId, 'typing', currentUser.uid);
+      await deleteDoc(typingRef);
+    } catch (err) {}
 
     try {
       let attachmentPayload = null;
@@ -892,10 +960,16 @@ export default function DirectChatsPage() {
               ) : (
                 messages.map((m) => {
                   const isMe = m.senderUid === currentUser?.uid;
+                  const isRead = m.status === 'read';
                   return (
                     <div key={m.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                      <span className="text-[10px] text-slate-500 mb-1 px-1">
+                      <span className="text-[10px] text-slate-500 mb-1 px-1 flex items-center gap-1.5">
                         {isMe ? 'You' : m.senderName || 'Peer'} • {m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                        {isMe && (
+                          <span title={isRead ? 'Read' : 'Sent'} className={`inline-flex items-center ${isRead ? 'text-indigo-400 font-bold' : 'text-slate-500'}`}>
+                            {isRead ? '✓✓' : '✓'}
+                          </span>
+                        )}
                       </span>
                       <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-xs sm:text-sm space-y-2 leading-relaxed ${
                         isMe ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-bl-none'
@@ -924,6 +998,17 @@ export default function DirectChatsPage() {
             </div>
 
             <footer className="p-3 bg-slate-900 border-t border-slate-800 relative">
+              {typingUsers.length > 0 && (
+                <div className="absolute -top-7 left-4 text-[11px] text-indigo-300 italic flex items-center gap-1.5 bg-slate-900/90 px-3 py-1 rounded-full border border-slate-800 shadow">
+                  <span className="flex gap-0.5 items-center">
+                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce"></span>
+                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                    <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                  </span>
+                  <span>{typingUsers.join(', ')} {typingUsers.length > 1 ? 'are' : 'is'} typing...</span>
+                </div>
+              )}
+
               {showEmojiPicker && (
                 <div className="absolute bottom-full left-3 mb-2 z-40 w-[min(380px,calc(100vw-24px))] rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl p-3 flex flex-col">
                   <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
@@ -966,7 +1051,7 @@ export default function DirectChatsPage() {
                 <input ref={fileInputRef} type="file" onChange={handleFileSelect} className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" />
                 <button type="button" onClick={() => setShowEmojiPicker((v) => !v)} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 transition" title="Choose emoji">😊</button>
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 transition" title="Attach file">📎</button>
-                <input type="text" value={text} onChange={(e) => setText(e.target.value)} placeholder={isUploading ? 'Uploading file...' : `Message ${activePeer.displayName}...`} disabled={isUploading} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50" />
+                <input type="text" value={text} onChange={handleInputChange} placeholder={isUploading ? 'Uploading file...' : `Message ${activePeer.displayName}...`} disabled={isUploading} className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition disabled:opacity-50" />
                 <button type="submit" disabled={(!text.trim() && !selectedFile) || isUploading} className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition shadow-md">
                   <Send className={`w-4 h-4 ${isUploading ? 'animate-pulse' : ''}`} />
                 </button>
