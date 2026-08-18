@@ -458,6 +458,17 @@ export default function DirectChatsPage() {
       const unsubscribeActiveCall = onSnapshot(activeCallRef, async (snap) => {
         if (snap.exists()) {
           const data = snap.data();
+          if (data.status === 'ended') {
+            stopRingtone();
+            callService.cleanup();
+            setCallActive(false);
+            setIncomingCall(null);
+            setCallType(null);
+            incomingCallConversationRef.current = null;
+            activeCallIdRef.current = null;
+            return;
+          }
+
           if (data.status === 'connected') {
             setCallStatus('connected');
             stopRingtone();
@@ -493,6 +504,10 @@ export default function DirectChatsPage() {
                 status: 'accepted',
               });
             }
+          }
+        } else {
+          if (callActiveRef.current) {
+            endCall();
           }
         }
       });
@@ -622,6 +637,25 @@ export default function DirectChatsPage() {
         await callService.acceptCall(incomingConvId, answer);
       }
 
+      onSnapshot(activeCallRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.status === 'ended') {
+            stopRingtone();
+            callService.cleanup();
+            setCallActive(false);
+            setIncomingCall(null);
+            setCallType(null);
+            incomingCallConversationRef.current = null;
+            activeCallIdRef.current = null;
+          }
+        } else {
+          if (callActiveRef.current) {
+            endCall();
+          }
+        }
+      });
+
       if (!callHistorySavedRef.current) {
         callHistorySavedRef.current = true;
         callHistoryService.logCall({
@@ -682,13 +716,23 @@ export default function DirectChatsPage() {
     if (currentUser && activeCallIdRef.current) {
       await incomingCallService.clearIncomingCall(currentUser.uid, activeCallIdRef.current);
     }
+
+    if (convId) {
+      try {
+        const activeCallRef = doc(db, 'conversations', convId, 'calls', 'active_call');
+        await updateDoc(activeCallRef, { status: 'ended', endedBy: currentUser?.uid });
+      } catch (err) {
+        // Document might already be cleared or deleted
+      }
+      await callService.terminateCall(convId);
+    }
+
     callService.cleanup();
     setCallActive(false);
     setIncomingCall(null);
     setCallType(null);
     incomingCallConversationRef.current = null;
     activeCallIdRef.current = null;
-    if (convId) await callService.terminateCall(convId);
   };
 
   return (
